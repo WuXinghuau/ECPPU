@@ -105,6 +105,15 @@ namespace OppoProject
           stripe.b = b;
           stripe.placementtype = m_encode_parameter.placementtype;
           stripe.encodetype = m_encode_parameter.encodetype;
+
+          //修改版本号
+          m_data_block_version[temp.Stripe_id]=std::vector<int>(k,initial_version_num);
+          for(int i=0;i<m+real_l+1;i++)
+          {
+            m_parity_block_version[temp.Stripe_id].push_back(std::vector<int>(k,initial_version_num));
+          }
+
+
           // for (int i = 0; i < k + m; i++) {
           //   // 其实应该根据placement_plan来添加node_id
           //   stripe.nodes.push_back(i);
@@ -139,6 +148,14 @@ namespace OppoProject
           //   // 其实应该根据placement_plan来添加node_id
           //   stripe.nodes.push_back(i);
           // }
+          //修改版本号
+          m_data_block_version[temp.Stripe_id]=std::vector<int>(k,initial_version_num);
+          for(int i=0;i<m+real_l+1;i++)
+          {
+            m_parity_block_version[temp.Stripe_id].push_back(std::vector<int>(k,initial_version_num));
+          }
+
+
           generate_placement(m_Stripe_info[stripe.Stripe_id].nodes, stripe.Stripe_id);
           new_object.stripes.push_back(stripe.Stripe_id);
 
@@ -184,6 +201,15 @@ namespace OppoProject
         stripe.b = b;
         stripe.placementtype = m_encode_parameter.placementtype;
         stripe.encodetype = m_encode_parameter.encodetype;
+
+        //修改版本号
+        m_data_block_version[temp.Stripe_id]=std::vector<int>(k,initial_version_num);
+        for(int i=0;i<m+real_l+1;i++)
+        {
+          m_parity_block_version[temp.Stripe_id].push_back(std::vector<int>(k,initial_version_num));
+        }
+
+
         // for (int i = 0; i < k + m; i++) {
         //   // 其实应该根据placement_plan来添加node_id
         //   stripe.nodes.push_back(i);
@@ -1716,7 +1742,7 @@ namespace OppoProject
       else // big obj
       {
 
-        /*1. spilt */
+       
         auto updated_stripe_shards = split_update_length(key, update_offset_infile, update_length); // stripeid->updated_shards
         if (updated_stripe_shards.size() > 1)
           std::cerr << "to much updated stripes only generate update plan of first stripe" << std::endl;
@@ -1726,7 +1752,7 @@ namespace OppoProject
           return grpc::Status::CANCELLED;
         }
 
-        /*2. 分成AZ范围内信息*/
+        
         auto it = updated_stripe_shards.begin();
         unsigned int temp_stripe_id = it->first;
         std::cout << "first updated stripe:" << temp_stripe_id << std::endl;

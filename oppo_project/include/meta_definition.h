@@ -131,6 +131,19 @@ namespace OppoProject
     MinimalTraffic
   };
 
+  enum DataNodeOp
+  {
+    MemcSetValue=0,//memcached
+    MemcGetValue=1,
+    MemcParityLogging=2,//log in file
+    MemcInplaceUpdate=3,
+    DiskDataSetWithVersion=4,
+    DiskParitySetWithVersion=5
+  };
+
+  const int initial_version_num=0;
+  const long long initial_disk_size=1<<32;
+
 } // namespace OppoProject
 
 #endif // META_DEFINITION

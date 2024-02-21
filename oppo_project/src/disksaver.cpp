@@ -8,9 +8,11 @@ DiskSaver::DiskSaver(/* args */)
     file_ptr=nullptr;
 
 }
-DiskSaver::DiskSaver(std::string fname)
+DiskSaver::DiskSaver(std::string fname,long long init_free)
 {
+    
     this->fname=fname;
+    this->rest_space=init_free;
     file_ptr=fopen(fname.c_str(),"w+b");
     if(file_ptr==NULL){
         std::cout<<"open or create disk file failed \n";
@@ -26,27 +28,44 @@ DiskSaver::~DiskSaver()
         if(file_ptr!=NULL) fclose(file_ptr);
     }
 }
-
-bool DiskSaver::data_set(const std::string key,int version,std::string &value)
+bool DiskSaver::init(std::string fname,long long init_free)
+{
+    this->fname=fname;
+    this->rest_space=init_free;
+    file_ptr=fopen(fname.c_str(),"w+b");
+    if(file_ptr==NULL){
+        std::cout<<"open or create disk file failed \n";
+        return false;
+    }
+    return true;
+    
+}
+bool DiskSaver::data_set(const std::string key,char* value,int value_size,int version)
 {
     if(m_datablock_meta.find(key)==m_datablock_meta.end())
     {
         unsigned long long freeSpace=get_freeS_space();
-        if(value.size()>freeSpace) return false;
+        if(value_size>freeSpace) return false;
         long long pos;
-        if(!write_value_to_file(const_cast<char*>(value.c_str()),pos,(int)value.size(),0)) return false;
+        if(!write_value_to_file(value,pos,value_size,0)) return false;
+        rest_space-=value_size;
+
         datablock_meta tempmeta;
         tempmeta.address=pos;
         tempmeta.version=version;
-        tempmeta.length=value.size();
+        tempmeta.length=value_size;
         m_datablock_meta[key]=tempmeta;
+
+        //db
+        xhdebug<<key<<"data version: "<< m_datablock_meta[key].version<<'\n';
+        //de
         return true;
     }
     else
     {
         long long addr=m_datablock_meta[key].address;
         long long pos;//useless
-        if(!write_value_to_file(const_cast<char*>(value.c_str()),pos,value.size(),addr)) return false;
+        if(!write_value_to_file(value,pos,value_size,addr)) return false;
         m_datablock_meta[key].version=version;
         return true;
     }
@@ -80,29 +99,36 @@ std::string DiskSaver::data_get(const std::string key,int &version) const
     return std::string(dddd.begin(),dddd.end());
     
 }
-bool DiskSaver::parity_set(const std::string key,std::vector<int> version,std::string &value)
+bool DiskSaver::parity_set(const std::string key,char* value,int value_size,std::vector<int> version)
+//bool DiskSaver::parity_set(const std::string key,std::vector<int> version,std::string &value)
+//
 {
     if(m_paritylock_meta.find(key)==m_paritylock_meta.end())
     {
         unsigned long long freeSpace=get_freeS_space();
-        if(value.size()>freeSpace) return false;
+        if((unsigned long long)value_size>freeSpace) return false;
         long long pos;
-        if(!write_value_to_file(const_cast<char*> (value.c_str()),pos,value.size(),0)) return false;
+        if(!write_value_to_file(value,pos,value_size,0)) return false;
+        rest_space-=value_size;
         parity_block_meta tempmeta;
         tempmeta.address=pos;
         tempmeta.v_version=version;
-        tempmeta.length=value.size();
+        tempmeta.length=value_size;
         m_paritylock_meta[key]=tempmeta;
+        //db
+        xhdebug<<key<<"parity version \n";
+        for(int i=0;i<m_paritylock_meta[key].v_version.size();i++) xhdebug<<m_paritylock_meta[key].v_version[i]<<' ';
+        xhdebug<<'\n';
+        //de
         return true;
     }
     else
     {
         long long addr=m_paritylock_meta[key].address;
         long long pos;//useless
-        if(!write_value_to_file(const_cast<char*>(value.c_str()),pos,value.size(),addr)) return false;
+        if(!write_value_to_file(value,pos,value_size,addr)) return false;
         m_paritylock_meta[key].v_version=version;
         return true;
-
     }
     return false;
 }
@@ -138,7 +164,7 @@ unsigned long long DiskSaver::get_freeS_space() const
     if (statvfs(fname.c_str(), &stat) == 0) {
         unsigned long long freeSpace = stat.f_frsize * stat.f_bavail;
         printf("剩余空间: %llu 字节\n", freeSpace);
-        return freeSpace;
+        return rest_space<freeSpace ? rest_space:freeSpace;
     } else {
         fprintf(stderr, "获取剩余空间失败\n");
         return -1;
@@ -146,10 +172,11 @@ unsigned long long DiskSaver::get_freeS_space() const
 }
 
 
-unsigned long long DiskSaver::get_freeS_space() const
+/*unsigned long long DiskSaver::get_freeS_space() const
 {
     return 1<<30;
 }
+*/
 
 
 

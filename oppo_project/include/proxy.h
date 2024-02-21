@@ -81,6 +81,10 @@ namespace OppoProject
     bool SetToMemcached(const char *key, size_t key_length, const char *value, size_t value_length, const char *ip, int port);
     bool SetToMemcached(const char *key, size_t key_length, size_t offset, const char *value, size_t value_length, const char *ip, int port);
     bool GetFromMemcached(const char *key, size_t key_length, char *value, size_t *value_length, int offset, int lenth, const char *ip, int port);
+    
+  
+    bool DataSetToDisk(const char *key, size_t key_length, const char *value, size_t value_length, const char *ip, int port,int version);
+    bool ParitySetToDisk(const char *key, size_t key_length, const char *value, size_t value_length, const char *ip, int port,std::vector<int> v_version);
 
     bool DeltaSendToMemcached(const char *key,size_t key_length,int offset_in_shard,const char *update_data,size_t update_data_length,int delta_type,const char* ip,int port);
     bool DeltaSendToProxy(OppoProject::Role role,std::vector<int> idxes,std::vector<std::vector<char>> &deltas,int offset_inshard,int length,OppoProject::DeltaType delta_type,const char *ip, int port);

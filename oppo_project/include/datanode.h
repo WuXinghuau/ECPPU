@@ -6,7 +6,7 @@
 #include <string>
 #include "logmanager.h"
 #include "azure_lrc.h"
-
+#include "disksaver.h"
 class DataNode
 {
 public:
@@ -22,6 +22,12 @@ public:
         std::cout<<"log file path:"<<log_file_path<<std::endl;
         logmanager.init(log_file_path);
 
+        //init diskfile
+        std::string disk_file_path = std::string(buff) + "/log/disk/disk"+std::to_string(port%1000)+".log";
+        std::cout<<"disk file path:"<<disk_file_path<<std::endl;
+        if(!disksaver.init(disk_file_path,OppoProject::initial_disk_size)) std::cout<<"init disk file error\n";
+        
+        
         memcached_return rc;
         m_memcached = memcached_create(NULL);
         memcached_server_st *servers;
@@ -44,6 +50,7 @@ private:
     memcached_st *m_memcached;
     std::string ip;
     int port;
+    DiskSaver disksaver;
     LogManager logmanager;
     asio::io_context io_context;
     asio::ip::tcp::acceptor acceptor;

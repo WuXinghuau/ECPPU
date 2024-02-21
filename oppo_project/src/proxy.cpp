@@ -1,4 +1,4 @@
-#include "proxy.h"
+#include "../include/proxy.h"
 #include "jerasure.h"
 #include "reed_sol.h"
 #include "tinyxml2.h"
@@ -69,6 +69,111 @@ namespace OppoProject
     // std::cout << "set " << std::string(key) << " " << std::string(ip) << " " << port << " " << (MEMCACHED_SUCCESS==rc) << " " << value_length << std::endl;
     return true;
   }
+
+  bool ProxyImpl::DataSetToDisk(const char *key, size_t key_length, const char *value, size_t value_length, const char *ip, int port,int version)
+  {
+    try
+    {
+      std::cout << "DataSetToDataNodeWithVersion"
+                << " " << std::string(ip) << " " << port << std::endl;
+      
+      std::cout<<"log path: "<<"/home/wxh/Documents/oppoEC/OOPPO/log/datanode/node"<<std::to_string(port%1000)<<".log"<<std::endl;
+
+      asio::ip::tcp::resolver resolver(io_context);
+      asio::ip::tcp::resolver::results_type endpoint = resolver.resolve(std::string(ip), std::to_string(port));
+      asio::ip::tcp::socket socket(io_context);
+      asio::connect(socket, endpoint);
+
+      int flag = OppoProject::DiskDataSetWithVersion;
+      std::vector<unsigned char> int_buf_flag = OppoProject::int_to_bytes(flag);
+      asio::write(socket, asio::buffer(int_buf_flag, int_buf_flag.size()));
+
+      std::vector<unsigned char> int_buf_key_size = OppoProject::int_to_bytes(key_length);
+      asio::write(socket, asio::buffer(int_buf_key_size, int_buf_key_size.size()));
+
+      std::vector<unsigned char> int_buf_value_size = OppoProject::int_to_bytes(value_length);
+      asio::write(socket, asio::buffer(int_buf_value_size, int_buf_value_size.size()));
+
+      asio::write(socket, asio::buffer(key, key_length));
+      asio::write(socket, asio::buffer(value, value_length));
+
+      //send verison
+      std::vector<unsigned char> int_buf_version = OppoProject::int_to_bytes(OppoProject::initial_version_num);
+      asio::write(socket, asio::buffer(int_buf_version, int_buf_version.size()));
+
+      std::string str(value,value_length);
+      std::cout << "Value to Set is :"
+                << " " << str << std::endl;
+      std::vector<char> finish(1);
+      asio::read(socket, asio::buffer(finish, finish.size()));
+
+      asio::error_code ignore_ec;
+      socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignore_ec);
+      socket.close(ignore_ec);
+    }
+    catch (std::exception &e)
+    {
+      std::cout << e.what() << std::endl;
+    }
+
+    // std::cout << "set " << std::string(key) << " " << std::string(ip) << " " << port << " " << (MEMCACHED_SUCCESS==rc) << " " << value_length << std::endl;
+    return true;
+
+  }
+  bool ProxyImpl::ParitySetToDisk(const char *key, size_t key_length, const char *value, size_t value_length, const char *ip, int port,
+                                                 std::vector<int> v_version)
+  {
+    try
+    {
+      std::cout << "ParitySetToDataNodeWithVersion"
+                << " " << std::string(ip) << " " << port << std::endl;
+      
+      std::cout<<"log path: "<<"/home/wxh/Documents/oppoEC/OOPPO/log/datanode/node"<<std::to_string(port%1000)<<".log"<<std::endl;
+
+      asio::ip::tcp::resolver resolver(io_context);
+      asio::ip::tcp::resolver::results_type endpoint = resolver.resolve(std::string(ip), std::to_string(port));
+      asio::ip::tcp::socket socket(io_context);
+      asio::connect(socket, endpoint);
+
+      int flag = OppoProject::DiskParitySetWithVersion;
+      std::vector<unsigned char> int_buf_flag = OppoProject::int_to_bytes(flag);
+      asio::write(socket, asio::buffer(int_buf_flag, int_buf_flag.size()));
+
+      std::vector<unsigned char> int_buf_key_size = OppoProject::int_to_bytes(key_length);
+      asio::write(socket, asio::buffer(int_buf_key_size, int_buf_key_size.size()));
+
+      std::vector<unsigned char> int_buf_value_size = OppoProject::int_to_bytes(value_length);
+      asio::write(socket, asio::buffer(int_buf_value_size, int_buf_value_size.size()));
+
+      asio::write(socket, asio::buffer(key, key_length));
+      asio::write(socket, asio::buffer(value, value_length));
+
+      //send v_version
+      OppoProject::send_int(socket,v_version.size());
+      for(int i=0;i<v_version.size();i++)
+      {
+        OppoProject::send_int(socket,v_version[i]);
+      }
+
+      std::string str(value,value_length);
+      std::cout << "Value to Set is :"
+                << " " << str << std::endl;
+      std::vector<char> finish(1);
+      asio::read(socket, asio::buffer(finish, finish.size()));
+
+      asio::error_code ignore_ec;
+      socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignore_ec);
+      socket.close(ignore_ec);
+    }
+    catch (std::exception &e)
+    {
+      std::cout << e.what() << std::endl;
+    }
+
+    // std::cout << "set " << std::string(key) << " " << std::string(ip) << " " << port << " " << (MEMCACHED_SUCCESS==rc) << " " << value_length << std::endl;
+    return true;
+  }
+
   bool ProxyImpl::GetFromMemcached(const char *key, size_t key_length,
                                    char *value, size_t *value_length, int offset, int lenth, const char *ip, int port)
   {
@@ -201,11 +306,13 @@ namespace OppoProject
           {
             if (j < k)
             {
-              SetToMemcached(shard_id.c_str(), shard_id.size(), data[j], x_shard_size, ip_and_port.first.c_str(), ip_and_port.second);
+              //SetToMemcached(shard_id.c_str(), shard_id.size(), data[j], x_shard_size, ip_and_port.first.c_str(), ip_and_port.second);
+              DataSetToDisk(shard_id.c_str(), shard_id.size(), data[j], x_shard_size, ip_and_port.first.c_str(), ip_and_port.second,OppoProject::initial_version_num);
             }
             else
             {
-              SetToMemcached(shard_id.c_str(), shard_id.size(), coding[j - k], x_shard_size, ip_and_port.first.c_str(), ip_and_port.second);
+              //SetToMemcached(shard_id.c_str(), shard_id.size(), coding[j - k], x_shard_size, ip_and_port.first.c_str(), ip_and_port.second);
+              ParitySetToDisk(shard_id.c_str(), shard_id.size(), coding[j - k], x_shard_size, ip_and_port.first.c_str(), ip_and_port.second,std::vector<int>(k,OppoProject::initial_version_num));
             }
           };
           for (int i = 0; i < int(stripe_ids.size()); i++)

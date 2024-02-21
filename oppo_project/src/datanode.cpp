@@ -11,7 +11,7 @@ void DataNode::do_work()
         std::vector<unsigned char> int_buf_flag(sizeof(int));
         asio::read(socket, asio::buffer(int_buf_flag, int_buf_flag.size()));
         int flag = OppoProject::bytes_to_int(int_buf_flag);
-        if (flag == 0)
+        if (flag == 0)//set
         {
             try
             {
@@ -20,12 +20,13 @@ void DataNode::do_work()
                 int key_size = OppoProject::bytes_to_int(int_buf);
                 asio::read(socket, asio::buffer(int_buf, int_buf.size()));
                 int value_size = OppoProject::bytes_to_int(int_buf);
-
                 std::vector<unsigned char> key_buf(key_size);
                 std::vector<unsigned char> value_buf(value_size);
                 asio::read(socket, asio::buffer(key_buf, key_buf.size()));
                 asio::read(socket, asio::buffer(value_buf, value_buf.size()));
-
+                
+                
+                //disksaver.data_set(std::string(key_buf.begin(), key_buf.end()),(char*)value_buf.data(),value_buf.size(),version);
                 memcached_return_t ret = memcached_set(m_memcached, (const char *)key_buf.data(), key_buf.size(), (const char *)value_buf.data(), value_buf.size(), (time_t)0, (uint32_t)0);
                 if (memcached_failed(ret))
                 {
@@ -44,7 +45,7 @@ void DataNode::do_work()
                 exit(-1);
             }
         }
-        else if (flag == 1)
+        else if (flag == 1)//get
         {
             try
             {
@@ -205,6 +206,88 @@ void DataNode::do_work()
                 exit(-1);
             }
             
+        }
+        else if(flag==OppoProject::DiskDataSetWithVersion)
+        {
+            try
+            {
+                asio::error_code error;
+                std::vector<unsigned char> int_buf(sizeof(int));
+                asio::read(socket, asio::buffer(int_buf, int_buf.size()));
+                int key_size = OppoProject::bytes_to_int(int_buf);
+                asio::read(socket, asio::buffer(int_buf, int_buf.size()));
+                int value_size = OppoProject::bytes_to_int(int_buf);
+                std::vector<unsigned char> key_buf(key_size);
+                std::vector<unsigned char> value_buf(value_size);
+                asio::read(socket, asio::buffer(key_buf, key_buf.size()));
+                asio::read(socket, asio::buffer(value_buf, value_buf.size()));
+                
+                int version = OppoProject::receive_int(socket,error);
+                //先同时在文件和memcached中存，测试正确性
+                disksaver.data_set(std::string(key_buf.begin(), key_buf.end()),(char*)value_buf.data(),value_buf.size(),version);
+                memcached_return_t ret = memcached_set(m_memcached, (const char *)key_buf.data(), key_buf.size(), (const char *)value_buf.data(), value_buf.size(), (time_t)0, (uint32_t)0);
+                if (memcached_failed(ret))
+                {
+                    std::cout << "memcached_set fail" << std::endl;
+                    printf("%d %s %d %d\n", key_size, std::string((char *)key_buf.data(), key_size).c_str(), port, ret);
+                }
+                std::vector<char> finish(1);
+                asio::write(socket, asio::buffer(finish, finish.size()));
+                asio::error_code ignore_ec;
+                socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignore_ec);
+                socket.close(ignore_ec);
+            }
+            catch (std::exception &e)
+            {
+                std::cout << e.what() << std::endl;
+                exit(-1);
+            }
+
+        }
+        else if (flag == OppoProject::DiskParitySetWithVersion)//set
+        {
+            try
+            {
+                asio::error_code error;
+                std::vector<unsigned char> int_buf(sizeof(int));
+                asio::read(socket, asio::buffer(int_buf, int_buf.size()));
+                int key_size = OppoProject::bytes_to_int(int_buf);
+                asio::read(socket, asio::buffer(int_buf, int_buf.size()));
+                int value_size = OppoProject::bytes_to_int(int_buf);
+                std::vector<unsigned char> key_buf(key_size);
+                std::vector<unsigned char> value_buf(value_size);
+                asio::read(socket, asio::buffer(key_buf, key_buf.size()));
+                asio::read(socket, asio::buffer(value_buf, value_buf.size()));
+                
+                //receive int
+
+                int v_version_len=OppoProject::receive_int(socket,error);
+                std::vector<int> v_version(v_version_len,0);
+                for(int i=0;i<v_version_len;i++)
+                {
+                    int ttttt=OppoProject::receive_int(socket,error);
+                    v_version[i]=ttttt;
+                }
+
+                
+                disksaver.parity_set(std::string(key_buf.begin(), key_buf.end()),(char*)value_buf.data(),value_buf.size(),v_version);
+                memcached_return_t ret = memcached_set(m_memcached, (const char *)key_buf.data(), key_buf.size(), (const char *)value_buf.data(), value_buf.size(), (time_t)0, (uint32_t)0);
+                if (memcached_failed(ret))
+                {
+                    std::cout << "memcached_set fail" << std::endl;
+                    printf("%d %s %d %d\n", key_size, std::string((char *)key_buf.data(), key_size).c_str(), port, ret);
+                }
+                std::vector<char> finish(1);
+                asio::write(socket, asio::buffer(finish, finish.size()));
+                asio::error_code ignore_ec;
+                socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignore_ec);
+                socket.close(ignore_ec);
+            }
+            catch (std::exception &e)
+            {
+                std::cout << e.what() << std::endl;
+                exit(-1);
+            }
         }
     }
 }

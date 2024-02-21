@@ -121,9 +121,6 @@ namespace OppoProject
     // update
     int m_updating_az_num = 0;
     std::map<unsigned int, std::vector<ShardidxRange>>
-
-
-
     split_update_length(std::string key, int update_offset_infile, int update_length);
 
     bool split_AZ_info(unsigned int temp_stripe_id, std::vector<ShardidxRange> &idx_ranges,
@@ -141,6 +138,10 @@ namespace OppoProject
     updateBuffer(std::string key,int update_offset_infile,int update_length,coordinator_proto::UpdateDataLocation *data_location);
 
 
+    /*for multiple version and update*/
+    std::map<unsigned int,std::vector<int>> m_data_block_version;//stripeid->k datablock version
+    std::map<unsigned int,std::vector<std::vector<int>>> m_parity_block_version;//stripe id -> m v_version
+    std::map<unsigned int,std::map<int,std::map<int,std::vector<int>>>> partial_update_placement;//stripeid dataidx dataverion if_parite_receive_delta
 
   };
 
