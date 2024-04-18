@@ -30,11 +30,13 @@ namespace OppoProject
     bool repair(std::vector<int> failed_node_list);
 
     // update
-    bool update(std::string key, int offset, int length,std::string &new_data,UpdateAlgorithm update_algorithm);
+    bool update(std::string key, int offset, int length,std::string &new_data,UpdateAlgorithm update_algorithm,int min_tolerace=2,int max_wait_time_ms=1000);
     bool update_multhread(std::string key, int offset, int length,std::string &new_data,UpdateAlgorithm update_algorithm);
     //log manager test
     bool write_to_logmanager(const char *key,size_t key_length,int offset_in_shard,const char *update_data,size_t update_data_length,int delta_type,const char* ip,int port);
 
+    //multi version
+    bool printVersionOnCoordinator(std::string key="") const;
   private:
     std::unique_ptr<coordinator_proto::CoordinatorService::Stub> m_coordinator_ptr;
     std::string m_coordinatorIpPort;

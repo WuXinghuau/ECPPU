@@ -89,7 +89,28 @@ namespace OppoProject
     updateRMW(::grpc::ServerContext *context,
                       const coordinator_proto::UpdatePrepareRequest *request,
                       coordinator_proto::UpdateDataLocation *data_location) override;
+    grpc::Status 
+    printVersion(::grpc::ServerContext *context,
+                     const coordinator_proto::printVersionReq* request, 
+                     coordinator_proto::printVersionResponse* response) override;
+    grpc::Status
+    PURMWGetLocation(::grpc::ServerContext *context,
+                      const coordinator_proto::PURMWPrepareReq *request,
+                      coordinator_proto::UpdateDataLocation *response) override;
+    grpc::Status 
+    ECPUGetLocation(::grpc::ServerContext *context,
+                      const coordinator_proto::PURMWPrepareReq *request,
+                      coordinator_proto::UpdateDataLocation *response) override;
+    grpc::Status
+    PURMWCheckFinished(::grpc::ServerContext *context,
+                      const coordinator_proto::AskRMWPUSucess *request,
+                      coordinator_proto::RepIfSetSucess *response) override;
 
+    grpc::Status
+    PURMWReportSuccess(::grpc::ServerContext *context,
+                      const coordinator_proto::PURMWCoordinatorReply *request,
+                      coordinator_proto::ReplyFromCoordinator *response) override;
+  
   private:
     std::mutex m_mutex;
     int m_next_stripe_id = 0;
@@ -134,15 +155,47 @@ namespace OppoProject
 
     bool RMW(std::string key, int update_offset_infile, int update_length, coordinator_proto::UpdateDataLocation *data_location);
     bool RCW(std::string key, int update_offset_infile, int update_length, coordinator_proto::UpdateDataLocation *data_location);
+    bool fill_update_plan(std::unordered_map<int, proxy_proto::DataProxyUpdatePlan> &dataproxy_notices,
+                                          const std::map<int, std::vector<ShardidxRange>> &AZ_updated_idxrange,
+                                          std::string key,StripeItem temp_stripe,int shard_update_offset,int shard_update_len);
+    bool fill_reconstruct_write_plan(proxy_proto::ReconstructWriteNotice &reconstructor_notice,int stripeid);
     grpc::Status
     updateBuffer(std::string key,int update_offset_infile,int update_length,coordinator_proto::UpdateDataLocation *data_location);
 
 
-    /*for multiple version and update*/
-    std::map<unsigned int,std::vector<int>> m_data_block_version;//stripeid->k datablock version
-    std::map<unsigned int,std::vector<std::vector<int>>> m_parity_block_version;//stripe id -> m v_version
-    std::map<unsigned int,std::map<int,std::map<int,std::vector<int>>>> partial_update_placement;//stripeid dataidx dataverion if_parite_receive_delta
 
+    /*for multiple version and update*/
+    std::map<unsigned int,std::vector<int>> 
+      m_data_block_version;//stripeid->k datablock version
+    std::map<unsigned int,std::vector<std::vector<int>>> 
+      m_parity_block_version;//stripe id -> m v_version
+    std::map<unsigned int,std::map<int,std::map<int,std::vector<int>>>> 
+      m_partial_update_placement;//stripeid dataidx dataverion if_parity_receive_delta
+    std::map<unsigned int,std::vector<int> > 
+      m_temp_old_stripe_version;//stripeid->v_version，在同步交代校验块状态到最新前保存开始更新时的v_version、
+    //通过old_v_version以及data idx  version标记DeltaP，
+    std::mutex m_PU_Meta_lock;
+    
+    /*for outtime reconstruce,update one stripe once*/
+    int m_PURMWupdating_stripeid=-1;
+    int m_PURMWupdating_AZid=-1;
+    int m_PURMWupate_stat=-1;
+    int m_PU_update_method=-1;//PURMW  or RCW
+    bool syn_stripe_parity(unsigned int stripeid);//根据 new_v_version old_v_version，以及partial_update_placement生成补全方案。
+
+    /*
+    grpc::Status  ECPUGetLocation(std::string key, int update_offset_infile,int  update_length);
+    grpc::Status  ECPUGetLocation(::grpc::ServerContext *context,
+                      const coordinator_proto::PURMWPrepareReq *request,
+                      coordinator_proto::UpdateDataLocation *response);
+    */
+
+    grpc::Status RPCPURMW(int stripeid,std::vector<OppoProject::ShardidxRange> idx_ranges,
+                          int shard_update_offset,int shard_update_len,
+                          std::map<int, std::vector<ShardidxRange>> &AZ_updated_idxrange,std::string key,
+                          std::map<int, std::vector<int>>& AZ_global_parity_idx,std::map<int, std::vector<int>> &AZ_local_parity_idx,
+                          int minimal_tolerance,int max_wait_time_ms);
+     
   };
 
   class Coordinator

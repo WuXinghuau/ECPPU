@@ -178,7 +178,6 @@ nohup ./oppo_project/cmake/build/run_datanode 0.0.0.0:49816 > ./log/datanode/nod
 nohup ./oppo_project/cmake/build/run_datanode 0.0.0.0:49817 > ./log/datanode/node817.log 2>&1 &
 nohup ./oppo_project/cmake/build/run_datanode 0.0.0.0:49818 > ./log/datanode/node818.log 2>&1 &
 nohup ./oppo_project/cmake/build/run_datanode 0.0.0.0:49819 > ./log/datanode/node819.log 2>&1 &
-
 nohup ./oppo_project/cmake/build/run_datanode 0.0.0.0:49900 > ./log/datanode/node900.log 2>&1 &
 nohup ./oppo_project/cmake/build/run_datanode 0.0.0.0:49901 > ./log/datanode/node901.log 2>&1 &
 nohup ./oppo_project/cmake/build/run_datanode 0.0.0.0:49902 > ./log/datanode/node902.log 2>&1 &

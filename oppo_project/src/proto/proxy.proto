@@ -33,6 +33,11 @@ service proxyService {
   rpc dataProxyRMW(DataProxyUpdatePlan) returns(DataProxyReply);
   rpc dataProxyRCW(DataProxyUpdatePlan) returns(DataProxyReply);
   rpc ReconstructWrite(ReconstructWriteNotice) returns(DataProxyReply);
+  rpc PARIXUpdate(DataProxyUpdatePlan) returns(DataProxyReply);
+  //versioned update
+  rpc dataProxyPURMW(PURMWNotice) returns (PURMWResponse);
+  rpc TimeoutRCW(ReconstructWriteNotice) returns (DataProxyReply);//out of time
+  rpc VersionedRCW(VersionRCWNotice) returns (DataProxyReply);
 }
 
 message mainRepairPlan {
@@ -247,4 +252,22 @@ message ReconstructWriteNotice{//重构写
   
 }
 
+message PURMWResponse{
+  string result=1;
+  int32 update_operation_id=2;
+  repeated int32 success_parity_idx=3;
+
+}
+
+message PURMWNotice{
+  DataProxyUpdatePlan data_proxy_plan=1;
+  repeated int32 latest_data_version=2;
+  int32 minimal_tolerance=3;
+  int32 max_wait_time_ms=4;
+}
+
+message VersionRCWNotice{
+  ReconstructWriteNotice base_rcw_info=1;
+  repeated int32 v_version=2;
+}
 

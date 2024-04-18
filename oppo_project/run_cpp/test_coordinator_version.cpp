@@ -105,7 +105,7 @@ int main(int argc, char **argv)
   {
     
     
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < 100; i++)
 
     {
       std::string key;
@@ -130,7 +130,7 @@ int main(int argc, char **argv)
       if (value == get_value) {
         std::cout << "set kv successfully" << std::endl;
       } else {
-        std::cout << "set != get wrong!" << std::endl;
+        std::cout << "wrong!" << std::endl;
         break;
       }
     }
@@ -200,149 +200,11 @@ int main(int argc, char **argv)
   else if(std::string(argv[11]) == "RMW") up_func=OppoProject::RMW;
   else if(std::string(argv[11]) == "AZCoordinated") up_func=OppoProject::AZCoordinated;
   
-
-  
-
-  //update test
-  
-
-  
-  //std::string new_v1="AgFZJOeRSukFbkinscTxiQmrvKUkEswXziztHDMWitsSQuGjkmCZoTjjXAUGRxalZIWqcgVtTJtAyfUZlxcDZAobSNwlYXAnBaCErzWrJRcWsZEneCvjeJErhnygrwuMDTggKsvHClRdIEPeqOnWagqboEAARBNKCfnaAskbwGQyZdcHVlwszQcOHExregOlIMBlJEWiRFONGBLJjRbBSTMkhJapebTyzVhjgEEnrHNZvyriLlDeNZBqtqMJrgRHKLBvJJUJTExfFQZxDtQUSrTcXBpUijUlIfgRFQxqZBfVkpQkrVywSJHABFLwKrhXZCzkCuNEttUkPsjclQWGqrZjBDsbEdPTIfVdOVNkyDUmIYVgCCaSnMiunfDPdSjWErmSqySJJBccOqTWJGnPXMcCUfdizKyOJRWIJyhHFwxqsZQDyDfpjkBXsLdhPgDdvmxhYRfTnzQyeWPklzGIzKEGiDKUeaUtjtvKkSAkILTkCRRzPglhFanhqqvSCglFjzDPXNthBfTZiafVIiGZcLrMwvqEVxdeHQFYbxgPFVBoTIAolLjZzyhdmTTRtpktnzmQqnzCAkipRVSnIpkVpzGUtPQaZNlSzcnqwLFYxRSTtAuYMkBzISfXijtZUpNcBsvNloMLPqlOBVjdtVzPVKLjSqwIDqpxiqxTGZqlIuRabSONxYVhnPpKDATGJJfCALpmDCxhzbmLRTjoXfammpWHOetolqmCuGqPecuDawsWDLPapoFLKwJwCUcyFzmwpJVJGOgfeSYqlwExMaJDkCDsDKuilLfhdTQWcmaRbVNncftpITjzgXXczXmBOFQdyjXAUAezBdnQsNsGrlcArGjWxcuHBEsZQBdOEzrMXqCowHpEIIRSKRyscCJBCaZjjdmuNosrSJXXsEuwYCUqfJsdYRcVkAzaZzYTeStKcQWdBywKfiShziuUAMlqPIvsJMUTpILWRbpTixvYlRNeLHEkMQiuOUKWaRMhvEHwNVkAPvWpNOKnGULCDEmyMRXGeEZwagUliXBecHmNNuIyTgxdgRfVAtzQ";
-  
-
-
-
-  
-  //std::string new_v1;
-  //new_v1="grEPPBdJqCAFzjIyfEHVEADViyIPudxvCRDMGngQPQXotPgfkkxOMhGJNojuFGTPFFfeRxTmSHPkAcGvILkvCIMrRFeCDlKuyBOnfoYfsyPVOADhpzpbpQNNRLJDdkKJSaXYdwuSuwxqUiBMqiRpIetESyRSxzuYUyjOXymawTrfgRcXjfodmzphQhNenSqABNzkTWRZequshqiiqoLxWiplHZaUaSCXQycYxJrIBvviTccoowvENEgjYdxiwsPARVLONYvxOTndcxiyXkhJZKIwYXwbSIkwhbxEPqDEBpbKBbdNxlIsMFWSnOZnNZZqGyfDgRcnSpztFhfDdrjFZYXSXveMnulzGqPUanCfghbyhOmTdGWzeoJJLmmfGaxWaQInbCxUcKMxIOcJTvWZPYxwATwwRwYTmzCMJzIYCqBRXBFCWTJQEmxdtccnCSDOZIoJAmZTfUdGiTpKuLkGuiWCZRWfGeXAcXyivKvhlwlaHdKOpYZPrtqTlAhzhQAHkPQQmiXxStOsNWCGMtGNDJMCLsMMePzurdMhihhyTEVlwRiCzmISPMWCsScGegRiBfXdmVskSCOPVGalRJixwNLKyePRNFOizevTtfzZKGepsoWirOzCbELjFWymgkRsoXaQHTZAmOZwPbzsyqWxDDGejHMkEOtXVkNXMLBJDIeeOdrwAECaZOglFpZTuzSqgFyONUNVqSsIrQtabhNfwoTiClbqNdMQMuaLZSnsFeHLvkrKPbteZjxTwYsGdQyfNuKzdtqjdHSImzdcZvFWxohERSJrMEeWJRlhOwlAOwyatiRGOkzjNXqMNCRVlApwZqSQskIKrrOHnbdgfGxsBRonNseCDnWgTQopJAVsOnrgNolFpvdxOSGgoHTquaEQEtxIPGRDuCYsyuVeIElgbmKsxttLxhUZNERFahGCGrwvTAVFMWqwAfgPlcrJBTyERObCfzndmZPwMcJnZntaLtLoIvXfACsAKrajzZbjFSfgkolyFPWEukVNQyCANZDGWwDxpEJTgKbyZmiptGouwsKuyXICpShv";
-  std::string local_v;
-  for(auto const &temp_kv:key_values)
-  {
-    
-    auto k1=temp_kv.first;
-    auto v1=temp_kv.second;
-    std::string new_v1;
-    OppoProject::random_generate_value(new_v1,2048/2+32);
-    int update_len=new_v1.length();
-    std::cout<<"key1:"<<k1<<std::endl;
-    std::cout<<"v1.len"<<v1.length();
-    std::cout<<"v1 before update "<<std::endl;
-    std::cout<<temp_kv.second;
-
-    //OppoProject::random_generate_value(new_v1,update_len);
-    //OppoProject::random_generate_value(new_v1,176);
-    std::cout<<"update len: "<<new_v1.length()<<std::endl;
-    local_v=temp_kv.second;
-    client.update(k1,0,new_v1.length(),new_v1,up_func);
-    //client.update_multhread(k1,0,new_v1.length(),new_v1,up_func);
-    key_values[k1].replace(0,update_len,new_v1);
-    std::cout<<"v1 after update "<<std::endl;
-    std::cout<<key_values[k1];
-    std::cout<<std::endl;
-  }
-
-  repairt_test(client,key_values);
-  
-  
-  
-  
- 
-  
-  
-
-  
-
-  
-
-  /**/
-  int success=0;
-  int failed=0;
-  for(auto const &temp_kv:key_values)
-  {
-    
-    std::string temp;
-    client.get(temp_kv.first,temp);
-    std::cout<<"key: "<<std::endl;
-    std::cout<<temp_kv.first<<std::endl;
-    std::cout<<"updated value:"<<std::endl;
-    std::cout<<temp_kv.second<<std::endl;
-    std::cout<<"get value:"<<std::endl;
-    std::cout<<temp<<std::endl;
-    
-    
-
-    if(temp!=temp_kv.second)
-    {
-      std::cout<<"G!!!!!!!"<<std::endl;
-      failed++;
-    }
-    
-    else 
-    {
-      std::cout<<"6666!!!!!!!!"<<std::endl;
-      success++;
-    }
-    
-
-  }
-  std::cout<<"sucess:"<<success<<" failed: "<<failed<<std::endl;
-  
-
-  std::vector<int> update_data_idxes;
-  std::vector<int> update_parity_idxes;
-  auto make_parity_idx=[&]()
-  {
-    for(int i=0;i<6;i++) update_data_idxes.push_back(i);
-    for(int i=k;i<k+g_m;i++) update_parity_idxes.push_back(i);
-  };
-  //RMW_test(local_v,new_v1,0,new_v1.length(),176,update_data_idxes,update_parity_idxes,k,g_m,real_l,OppoProject::Azure_LRC_1);
-
-
-  
-
-  
-  
+  client.printVersionOnCoordinator();
+  return 0;
   
 }
-/*
-{
-    std::string test_k;
-  OppoProject::random_generate_value(test_k,6);
-  
-  while(key_values.find(test_k)!=key_values.end()) OppoProject::random_generate_value(test_k,6);
-  std::cout<<"file key "<<test_k<<std::endl;
-  std::string test_v;
-  OppoProject::random_generate_value(test_v,2048);
-  
-  std::string local_v=test_v;
-  std::cout<<"v1 before update:"<<std::endl;
-  std::cout<<test_v<<std::endl;
-  key_values[test_k]=test_v;
 
-
-  client.update(test_k,0,new_v1.length(),new_v1);
-  key_values[test_k].replace(0,update_len,new_v1);
-  std::cout<<"get location sucess"<<std::endl;
-  std::cout<<"v1 after update "<<std::endl;
-  std::cout<<key_values[test_k];
-  std::cout<<std::endl;
-
-  
-  std::vector<int> dataidxes;
-  std::vector<int> parityidxes;
-  for(int i=0;i<6;i++) dataidxes.push_back(i);
-  for(int i=12;i<12+6;i++) parityidxes.push_back(i);
-  std::cout<<" local v before update: "<<std::endl;
-  
-  std::cout<<"new_v1:"<<std::endl;
-  std::cout<<new_v1<<std::endl;
-  std::cout<<"after update"<<std::endl;
-  std::cout<<key_values.begin()->second<<std::endl;
-
-
-  std::cout<<local_v<<std::endl;
-}
-*/
 void split_to_data_blocks(std::string &string,std::vector<char *> &v_data,char ** data,int k,int blocksize)
 {
     char* buf=const_cast<char*> (string.data());

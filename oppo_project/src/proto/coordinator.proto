@@ -34,6 +34,14 @@ service CoordinatorService {
   rpc updateRMW(UpdatePrepareRequest) returns(UpdateDataLocation){};
   rpc updateReportSuccess(CommitAbortKey) returns (ReplyFromCoordinator){};
   rpc checkUpdateFinished (AskIfSetSucess) returns (RepIfSetSucess){};
+  rpc printVersion(printVersionReq) returns(printVersionResponse){};
+
+  //PURMW
+  rpc PURMWGetLocation(PURMWPrepareReq) returns(UpdateDataLocation){};
+  rpc ECPUGetLocation(PURMWPrepareReq) returns(UpdateDataLocation){};
+  rpc PURMWCheckFinished(AskRMWPUSucess) returns(RepIfSetSucess){};
+  rpc PURMWReportSuccess(PURMWCoordinatorReply)  returns (ReplyFromCoordinator){};
+
 }
 
 message FailNodes {
@@ -123,3 +131,30 @@ message UpdateDataLocation{
   bool padding_to_shard=13;
 }
 
+message printVersionReq{
+  bool printAllStripes=1;
+  string key=2;
+}
+message printVersionResponse{
+  bool success=1;
+}
+
+message PURMWPrepareReq{
+  UpdatePrepareRequest update_pre_req=1;
+  int32 minimal_tolerance=2;//应改成最多能容忍的更新丢失，stripe元数据在MDS中，更新时不知道k,m
+  int32 max_wait_time_ms=3;
+}
+
+
+message AskRMWPUSucess{
+  string key=1;
+  int32 max_wait_time_ms=2;
+}
+
+message PURMWCoordinatorReply{
+  int32 stripeid=1;
+  repeated int32 success_parity_ids=2;
+  int32 dataidx=3;
+  int32 dataversion=4;
+  int32 purmw_result=5;
+}

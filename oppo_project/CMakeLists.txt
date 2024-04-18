@@ -83,7 +83,7 @@ aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src/   PROJECT_SRC)
 
 # Targets (client|server)
 foreach (_target
-        run_client run_coordinator run_proxy run_datanode test_tools run_rmw)
+        run_client run_coordinator run_proxy run_datanode test_tools run_rmw run_purmw run_up_test)
     add_executable(${_target}
             ${cn_proto_srcs}
             ${cn_grpc_srcs}
@@ -99,6 +99,11 @@ foreach (_target
             ${CMAKE_CURRENT_SOURCE_DIR}/src/datanode.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/src/azure_lrc.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/src/logmanager.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/disksaver.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/blockfilesaver.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/fileaccesser.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/fileaccesser.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/versionedLogManager.cpp
             #${_target}.cpp
             )
     target_link_libraries(${_target}

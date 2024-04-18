@@ -6,7 +6,9 @@
 #include <string>
 #include "logmanager.h"
 #include "azure_lrc.h"
-#include "disksaver.h"
+#include "blockfilesaver.h"
+#include "versionedLogManager.h"
+
 class DataNode
 {
 public:
@@ -18,15 +20,19 @@ public:
         char buff[512];
         getcwd(buff, 512);
         std::cout<<"pwd:"<<buff<<std::endl;
-        std::string log_file_path = std::string(buff) + "/../paritylog/node"+std::to_string(port)+".log";
+        //std::string log_file_path = std::string(buff) + "/../../../log/paritylog/PL"+std::to_string(port%1000)+".log";
+        std::string log_file_path="/home/wxh/Documents/oppoEC/OOPPO/log/paritylog/PL"+std::to_string(port%1000)+".log";
         std::cout<<"log file path:"<<log_file_path<<std::endl;
         logmanager.init(log_file_path);
 
         //init diskfile
-        std::string disk_file_path = std::string(buff) + "/log/disk/disk"+std::to_string(port%1000)+".log";
+        //std::string disk_file_path = std::string(buff) + "/../../../log/disk/disk"+std::to_string(port%1000)+".log";
+        std::string disk_file_path ="/home/wxh/Documents/oppoEC/OOPPO/log/disk/disk"+std::to_string(port%1000)+".log";
         std::cout<<"disk file path:"<<disk_file_path<<std::endl;
-        if(!disksaver.init(disk_file_path,OppoProject::initial_disk_size)) std::cout<<"init disk file error\n";
-        
+        if(!blocksaver.init(disk_file_path)) std::cerr<<"init disk file error\n";
+        std::string versioned_log_file_path="/home/wxh/Documents/oppoEC/OOPPO/log/versionPL/PL"+std::to_string(port%1000)+".log";
+        std::cerr<<"vesioned log file path:"<<versioned_log_file_path<<std::endl;
+        if(!versioned_log_manager.init(versioned_log_file_path))   std::cerr<<"init version_log_manager file error\n";      
         
         memcached_return rc;
         m_memcached = memcached_create(NULL);
@@ -50,8 +56,9 @@ private:
     memcached_st *m_memcached;
     std::string ip;
     int port;
-    DiskSaver disksaver;
+    BlockFileSaver blocksaver;
     LogManager logmanager;
+    VersionedLogManager versioned_log_manager;
     asio::io_context io_context;
     asio::ip::tcp::acceptor acceptor;
 

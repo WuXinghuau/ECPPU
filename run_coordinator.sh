@@ -1,0 +1,1 @@
+nohup ./oppo_project/cmake/build/run_coordinator > ./log/coordinator.log 2>&1

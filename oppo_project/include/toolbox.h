@@ -18,8 +18,10 @@ namespace OppoProject
     std::string gen_key(int key_len, std::unordered_set<std::string> keys);
     int receive_int(asio::ip::tcp::socket &socket,asio::error_code &error);
     bool send_int(asio::ip::tcp::socket &socket,int data);
-    
-    
+    bool send_vec_int(asio::ip::tcp::socket &socket,std::vector<int> &vec);
+    bool receive_vec_int(asio::ip::tcp::socket &socket,std::vector<int> &vec,asio::error_code &error);
+    bool write_value_to_file(char * data,long long &retaddr,int length,long long offset_in_file,FILE* file_ptr);//default 0,set ,else update
+    bool read_value_from_file(char* data, long long addr,int length,FILE* file_ptr) ;
 
 } // namespace OppoProject
 #endif

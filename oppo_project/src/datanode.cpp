@@ -8,6 +8,7 @@ void DataNode::do_work()
     {
         asio::ip::tcp::socket socket(io_context);
         acceptor.accept(socket);
+        
         std::vector<unsigned char> int_buf_flag(sizeof(int));
         asio::read(socket, asio::buffer(int_buf_flag, int_buf_flag.size()));
         int flag = OppoProject::bytes_to_int(int_buf_flag);
@@ -24,15 +25,18 @@ void DataNode::do_work()
                 std::vector<unsigned char> value_buf(value_size);
                 asio::read(socket, asio::buffer(key_buf, key_buf.size()));
                 asio::read(socket, asio::buffer(value_buf, value_buf.size()));
-                
-                
-                //disksaver.data_set(std::string(key_buf.begin(), key_buf.end()),(char*)value_buf.data(),value_buf.size(),version);
+                auto temp_file_save=std::make_shared<std::vector<unsigned char>>(value_size);
+                /**/
+                std::copy(value_buf.begin(),value_buf.end(),temp_file_save->begin());
+                blocksaver.set(std::string(key_buf.begin(),key_buf.end()),temp_file_save);
+                /*
                 memcached_return_t ret = memcached_set(m_memcached, (const char *)key_buf.data(), key_buf.size(), (const char *)value_buf.data(), value_buf.size(), (time_t)0, (uint32_t)0);
                 if (memcached_failed(ret))
                 {
                     std::cout << "memcached_set fail" << std::endl;
                     printf("%d %s %d %d\n", key_size, std::string((char *)key_buf.data(), key_size).c_str(), port, ret);
                 }
+                */
                 std::vector<char> finish(1);
                 asio::write(socket, asio::buffer(finish, finish.size()));
                 asio::error_code ignore_ec;
@@ -66,19 +70,29 @@ void DataNode::do_work()
                 memcached_return_t error;
                 uint32_t flag;
                 size_t value_size;
+                std::shared_ptr<std::vector<unsigned char>> disk_saved_value = blocksaver.get(std::string(key_buf.begin(),key_buf.end()));
+                //char *value_ptr=const_cast<char*>( disk_saved_value.c_str());
+                
+                
+                /*
                 char *value_ptr = memcached_get(m_memcached, (const char *)key_buf.data(), key_buf.size(), &value_size, &flag, &error);
                 if (value_ptr == NULL)
                 {
                     std::cout << "memcached_get fail" << std::endl;
                     printf("%d %s %d %d\n", key_size, std::string((char *)key_buf.data(), key_size).c_str(), port, error);
                 }
+                */
+                
+                
                 
                 
                 //wxh
                 //logmanager.merge_with_parity(std::string(key_buf.begin(),key_buf.end()),value_ptr,value_size);
-                put_log(1,port,std::string(key_buf.begin(),key_buf.end()),std::string(value_ptr,value_size));
-
-                asio::write(socket, asio::buffer(value_ptr + offset, lenth));
+                put_log(1,port,std::string(key_buf.begin(),key_buf.end()),std::string(disk_saved_value->begin(),disk_saved_value->end()));
+                //put_log(1,port,std::string(key_buf.begin(),key_buf.end()),std::string(value_ptr,value_size));
+                //asio::write(socket, asio::buffer(value_ptr + offset, lenth));
+                //asio::write(socket, asio::buffer(disk_saved_value));
+                asio::write(socket, asio::buffer(disk_saved_value->data() + offset, lenth));
                 asio::error_code ignore_ec;
                 socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignore_ec);
                 socket.close(ignore_ec);
@@ -90,7 +104,7 @@ void DataNode::do_work()
             }
         }
         else if(flag==2)
-        {//receive delta ,and write into log
+        {//receive delta,PL ,and write into log
             try
             {
                 asio::error_code error;
@@ -104,7 +118,7 @@ void DataNode::do_work()
                 std::shared_ptr<std::vector<unsigned char> > update_data_ptr=std::make_shared<std::vector<unsigned char>>(update_data_size);
 
                 asio::read(socket, asio::buffer(key_buf, key_buf.size()));
-                std::cout<<"receive key: "<<std::string((char *)key_buf.data(), key_size)<<"len: "<<update_data_size<<std::endl;
+                std::cout<<"Parity logging receive key: "<<std::string((char *)key_buf.data(), key_size)<<"len: "<<update_data_size<<std::endl;
 
                 asio::read(socket, asio::buffer(update_data_ptr.get()->data(), update_data_size));
                 std::cout<<std::endl;
@@ -137,7 +151,7 @@ void DataNode::do_work()
         }
 
         else if(flag==3)
-        {//receive delta ,merge with parity and write to memcached
+        {// receive delta ,inplace update
             try
             {
                 asio::error_code error;
@@ -151,7 +165,7 @@ void DataNode::do_work()
                 std::shared_ptr<std::vector<unsigned char> > update_data_ptr=std::make_shared<std::vector<unsigned char>>(update_data_size);
 
                 asio::read(socket, asio::buffer(key_buf, key_buf.size()));
-                std::cout<<"receive key: "<<std::string((char *)key_buf.data(), key_size)<<"len: "<<update_data_size<<std::endl;
+                std::cout<<"Inplace update receive key: "<<std::string((char *)key_buf.data(), key_size)<<"len: "<<update_data_size<<std::endl;
 
                 asio::read(socket, asio::buffer(update_data_ptr.get()->data(), update_data_size));
                 std::cout<<"receive delta is: "<<std::endl;
@@ -182,10 +196,20 @@ void DataNode::do_work()
                 std::cout<<"stored value len: "<<value_size<<std::endl;
                 std::vector<char> temp_merge(update_data_size);
 
-                OppoProject::calculate_data_delta((char*)(update_data_ptr.get())->data(),value_ptr,temp_merge.data(),update_data_size);
+                //disk 
+                std::shared_ptr<std::vector<unsigned char>> disk_saved_value= blocksaver.get(std::string(key_buf.begin(),key_buf.end()));
+                OppoProject::calculate_data_delta((char*)(update_data_ptr.get())->data(),(char*)(disk_saved_value->data()),temp_merge.data(),update_data_size);
                 std::cout<<"merged is:"<<std::endl<<std::string(temp_merge.data(),update_data_size)<<std::endl;
 
                 put_log(3,port,std::string(key_buf.begin(),key_buf.end()),std::string((char*)update_data_ptr->data(),update_data_size),std::string(value_ptr,value_size),std::string(temp_merge.data(),update_data_size));
+                auto temp_file_save=std::make_shared<std::vector<unsigned char>>(update_data_size);
+                /**/
+                std::copy(temp_merge.begin(),temp_merge.end(),temp_file_save->begin());
+                if(!blocksaver.set(std::string(key_buf.begin(), key_buf.end()),temp_file_save))
+                {
+                    std::cout<<"disk update fail\n";
+                    put_log(10,port,std::string(key_buf.begin(),key_buf.end()),"disk set fail\n");
+                } 
                 memcached_return_t ret = memcached_set(m_memcached, (const char *)key_buf.data(), key_buf.size(), (const char *)temp_merge.data(), temp_merge.size(), (time_t)0, (uint32_t)0);
                 if (memcached_failed(ret))
                 {
@@ -212,25 +236,27 @@ void DataNode::do_work()
             try
             {
                 asio::error_code error;
-                std::vector<unsigned char> int_buf(sizeof(int));
-                asio::read(socket, asio::buffer(int_buf, int_buf.size()));
-                int key_size = OppoProject::bytes_to_int(int_buf);
-                asio::read(socket, asio::buffer(int_buf, int_buf.size()));
-                int value_size = OppoProject::bytes_to_int(int_buf);
+                int key_size = OppoProject::receive_int(socket,error);
+                int value_size = OppoProject::receive_int(socket,error);
                 std::vector<unsigned char> key_buf(key_size);
-                std::vector<unsigned char> value_buf(value_size);
+
+                std::shared_ptr<std::vector<unsigned char> > data_ptr=std::make_shared<std::vector<unsigned char>>(value_size);
+
                 asio::read(socket, asio::buffer(key_buf, key_buf.size()));
-                asio::read(socket, asio::buffer(value_buf, value_buf.size()));
+                asio::read(socket, asio::buffer(data_ptr.get()->data(), value_size));
                 
                 int version = OppoProject::receive_int(socket,error);
+
                 //先同时在文件和memcached中存，测试正确性
-                disksaver.data_set(std::string(key_buf.begin(), key_buf.end()),(char*)value_buf.data(),value_buf.size(),version);
-                memcached_return_t ret = memcached_set(m_memcached, (const char *)key_buf.data(), key_buf.size(), (const char *)value_buf.data(), value_buf.size(), (time_t)0, (uint32_t)0);
-                if (memcached_failed(ret))
-                {
-                    std::cout << "memcached_set fail" << std::endl;
-                    printf("%d %s %d %d\n", key_size, std::string((char *)key_buf.data(), key_size).c_str(), port, ret);
-                }
+                blocksaver.data_set(std::string(key_buf.begin(), key_buf.end()),data_ptr,version);
+              
+                // memcached_return_t ret = memcached_set(m_memcached, (const char *)key_buf.data(), key_buf.size(), (const char *)data_ptr->data(), value_size, (time_t)0, (uint32_t)0);
+                // if (memcached_failed(ret))
+                // {
+                //     std::cout << "memcached_set fail" << std::endl;
+                //     printf("%d %s %d %d\n", key_size, std::string((char *)key_buf.data(), key_size).c_str(), port, ret);
+                // }
+
                 std::vector<char> finish(1);
                 asio::write(socket, asio::buffer(finish, finish.size()));
                 asio::error_code ignore_ec;
@@ -249,34 +275,23 @@ void DataNode::do_work()
             try
             {
                 asio::error_code error;
-                std::vector<unsigned char> int_buf(sizeof(int));
-                asio::read(socket, asio::buffer(int_buf, int_buf.size()));
-                int key_size = OppoProject::bytes_to_int(int_buf);
-                asio::read(socket, asio::buffer(int_buf, int_buf.size()));
-                int value_size = OppoProject::bytes_to_int(int_buf);
+                int key_size = OppoProject::receive_int(socket,error);
+                int value_size = OppoProject::receive_int(socket,error);
                 std::vector<unsigned char> key_buf(key_size);
-                std::vector<unsigned char> value_buf(value_size);
+
+                std::shared_ptr<std::vector<unsigned char> > data_ptr=std::make_shared<std::vector<unsigned char>>(value_size);
+
                 asio::read(socket, asio::buffer(key_buf, key_buf.size()));
-                asio::read(socket, asio::buffer(value_buf, value_buf.size()));
+                asio::read(socket, asio::buffer(data_ptr.get()->data(), value_size));
                 
-                //receive int
-
-                int v_version_len=OppoProject::receive_int(socket,error);
-                std::vector<int> v_version(v_version_len,0);
-                for(int i=0;i<v_version_len;i++)
-                {
-                    int ttttt=OppoProject::receive_int(socket,error);
-                    v_version[i]=ttttt;
-                }
+                //receive vec int
+                std::vector<int> v_version;
+                OppoProject::receive_vec_int(socket,v_version,error);
 
                 
-                disksaver.parity_set(std::string(key_buf.begin(), key_buf.end()),(char*)value_buf.data(),value_buf.size(),v_version);
-                memcached_return_t ret = memcached_set(m_memcached, (const char *)key_buf.data(), key_buf.size(), (const char *)value_buf.data(), value_buf.size(), (time_t)0, (uint32_t)0);
-                if (memcached_failed(ret))
-                {
-                    std::cout << "memcached_set fail" << std::endl;
-                    printf("%d %s %d %d\n", key_size, std::string((char *)key_buf.data(), key_size).c_str(), port, ret);
-                }
+                blocksaver.parity_set(std::string(key_buf.begin(), key_buf.end()),data_ptr,v_version);
+
+                /*write success*/
                 std::vector<char> finish(1);
                 asio::write(socket, asio::buffer(finish, finish.size()));
                 asio::error_code ignore_ec;
@@ -288,6 +303,97 @@ void DataNode::do_work()
                 std::cout << e.what() << std::endl;
                 exit(-1);
             }
+        }
+        else if (flag == OppoProject::PUDeltaSetWithVersion)
+        {
+            try
+            {
+                asio::error_code error;
+                int key_size = OppoProject::receive_int(socket,error);
+                int update_data_size=OppoProject::receive_int(socket,error);
+
+                std::vector<unsigned char> key_buf(key_size);
+                
+                std::cout<<" update len: "<<update_data_size<<std::endl;
+
+                std::shared_ptr<std::vector<unsigned char> > update_data_ptr=std::make_shared<std::vector<unsigned char>>(update_data_size);
+
+                asio::read(socket, asio::buffer(key_buf, key_buf.size()));
+                std::cout<<"PU receive key: "<<std::string((char *)key_buf.data(), key_size)<<"len: "<<update_data_size<<std::endl;
+
+                asio::read(socket, asio::buffer(update_data_ptr.get()->data(), update_data_size));
+                std::cout<<std::endl;
+                
+                int offset_in_shard=OppoProject::receive_int(socket,error);
+                int delta_type=OppoProject::receive_int(socket,error);
+
+                //receive data idx version 
+                int stripeid=OppoProject::receive_int(socket,error);
+                std::vector<int> latest_version;
+                OppoProject::receive_vec_int(socket,latest_version,error);
+                int data_idx=OppoProject::receive_int(socket,error);
+                int data_version=OppoProject::receive_int(socket,error);
+                std::cout<<"PURMW receive deltaP "<<data_idx<<" "<<data_version<<std::endl;
+                
+                blocksaver.set_parity_latest_verson(std::string(key_buf.begin(),key_buf.end()),latest_version);
+                versioned_log_manager.append_parity_delta(std::string(key_buf.begin(),key_buf.end()),data_idx,data_version,update_data_ptr);
+                
+
+                //write back success
+                std::vector<char> finish(1);
+                asio::write(socket, asio::buffer(finish, finish.size()));
+                asio::error_code ignore_ec;
+                socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignore_ec);
+                socket.close(ignore_ec);
+
+                std::cout<<"update shardid:"<<key_buf.data()<<" offset"<<offset_in_shard<<std::endl;
+                OppoProject::LogEntry log_entry(std::string(key_buf.begin(),key_buf.end()),offset_in_shard,update_data_size,(OppoProject::DeltaType)delta_type,update_data_ptr);
+                logmanager.append_to_log(log_entry);
+                std::vector<OppoProject::LogEntry> log_entries;
+                //logmanager.get_entries(std::string(key_buf.begin(),key_buf.end()),log_entries);
+            }
+            catch (std::exception &e)
+            {
+                std::cout << e.what() << std::endl;
+                exit(-1);
+            }
+        }
+        else if (flag == OppoProject::DisKRCWParitySet)
+        {
+            /*接收sharid value version ,之后要修改blocksaver verison，标删VersionLogManager Delta*/
+            try
+            {
+                asio::error_code error;
+                int key_size = OppoProject::receive_int(socket,error);
+                int value_size = OppoProject::receive_int(socket,error);
+                std::vector<unsigned char> key_buf(key_size);
+                std::shared_ptr<std::vector<unsigned char> > update_data_ptr=std::make_shared<std::vector<unsigned char>>(value_size);
+
+                asio::read(socket, asio::buffer(key_buf, key_buf.size()));
+                asio::read(socket, asio::buffer(update_data_ptr.get()->data(), value_size));
+                
+                //receive v_version 
+                std::vector<int> v_version;
+                OppoProject::receive_vec_int(socket,v_version,error);
+                
+                blocksaver.parity_set(std::string(key_buf.begin(), key_buf.end()),update_data_ptr,v_version);
+                blocksaver.erase_parity_latest_verson(std::string(key_buf.begin(), key_buf.end()));
+                versioned_log_manager.mark_delete_delta(std::string(key_buf.begin(), key_buf.end()));
+
+                
+                /*write back*/
+                std::vector<char> finish(1);
+                asio::write(socket, asio::buffer(finish, finish.size()));
+                asio::error_code ignore_ec;
+                socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignore_ec);
+                socket.close(ignore_ec);
+            }
+            catch (std::exception &e)
+            {
+                std::cout << e.what() << std::endl;
+                exit(-1);
+            }
+
         }
     }
 }
@@ -316,7 +422,7 @@ void DataNode::put_log(int flag,int port,std::string key,std::string print_data,
 
 
     }
-    else if(flag==3)//inplace update
+    else if(flag==3||flag==10)//inplace update
     {
         fwrite("flag= ",6,1,log_file_ptr);
         fprintf(log_file_ptr,"%d",flag);

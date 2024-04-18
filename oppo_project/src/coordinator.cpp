@@ -107,11 +107,13 @@ namespace OppoProject
           stripe.encodetype = m_encode_parameter.encodetype;
 
           //修改版本号
+          
           m_data_block_version[temp.Stripe_id]=std::vector<int>(k,initial_version_num);
           for(int i=0;i<m+real_l+1;i++)
           {
             m_parity_block_version[temp.Stripe_id].push_back(std::vector<int>(k,initial_version_num));
           }
+          
 
 
           // for (int i = 0; i < k + m; i++) {
@@ -149,11 +151,13 @@ namespace OppoProject
           //   stripe.nodes.push_back(i);
           // }
           //修改版本号
+          
           m_data_block_version[temp.Stripe_id]=std::vector<int>(k,initial_version_num);
           for(int i=0;i<m+real_l+1;i++)
           {
             m_parity_block_version[temp.Stripe_id].push_back(std::vector<int>(k,initial_version_num));
           }
+          
 
 
           generate_placement(m_Stripe_info[stripe.Stripe_id].nodes, stripe.Stripe_id);
@@ -203,11 +207,13 @@ namespace OppoProject
         stripe.encodetype = m_encode_parameter.encodetype;
 
         //修改版本号
+        
         m_data_block_version[temp.Stripe_id]=std::vector<int>(k,initial_version_num);
         for(int i=0;i<m+real_l+1;i++)
         {
           m_parity_block_version[temp.Stripe_id].push_back(std::vector<int>(k,initial_version_num));
         }
+        
 
 
         // for (int i = 0; i < k + m; i++) {
@@ -2223,6 +2229,321 @@ namespace OppoProject
     return grpc::Status::OK;
   }
 
+  grpc::Status CoordinatorImpl::ECPUGetLocation(::grpc::ServerContext *context,
+                      const coordinator_proto::PURMWPrepareReq *request,
+                      coordinator_proto::UpdateDataLocation *response)
+  {
+    auto update_pre_req = request->update_pre_req();
+    int  minimal_tolerance = request->minimal_tolerance();
+    int  max_wait_time_ms = request->max_wait_time_ms();
+    std::string key=update_pre_req.key();
+    int update_offset_infile=update_pre_req.offset();
+    int update_length=update_pre_req.length();
+    /*split stripe*/
+    auto updated_stripe_shards = split_update_length(key, update_offset_infile, update_length); // stripeid->updated_shards
+    int stripeid = updated_stripe_shards.begin()->first;
+    auto idx_ranges = updated_stripe_shards.begin()->second;
+    std::map<int, std::vector<ShardidxRange>> AZ_updated_idxrange;
+    std::map<int, std::vector<int>> AZ_global_parity_idx;//useless
+    std::map<int, std::vector<int>> AZ_local_parity_idx;//useless
+     /*2. split in AZ*/
+    split_AZ_info(stripeid, idx_ranges, AZ_updated_idxrange, AZ_global_parity_idx, AZ_local_parity_idx);
+    /*3. fill reply to client*/
+
+    m_mutex.lock();
+    StripeItem &temp_stripe = m_Stripe_info[stripeid];
+    m_mutex.unlock();
+
+    int shard_update_len = 0;    // to inform AZ
+    int shard_update_offset = 0; // to inform AZ
+    int shard_size = temp_stripe.shard_size;
+    bool padding = idx_ranges.size() > 1 ? true : false;//小对象肯定1个shard 更新 
+    if (padding)
+    {
+      shard_update_offset = 0;
+      shard_update_len = shard_size;
+    }
+    else
+    {
+      if (idx_ranges.size() == 0)
+        std::cout << "no updated shard!" << std::endl;
+      shard_update_offset = idx_ranges[0].offset_in_shard;
+      shard_update_len = idx_ranges[0].range_length;
+    }
+
+    //要把所有的的块放在一个AZ中后fill,方便RCW
+    if(AZ_updated_idxrange.size()>1)
+    {
+      std::cerr<<"ecpu rcw more than 1AZ,merge\n";
+      std::vector<ShardidxRange> temp_rnages;
+      int max_azid=0;
+      int max_num=0;
+      for(auto const & ttt : AZ_updated_idxrange)
+      {
+        if(ttt.second.size()>max_num)
+        {
+          max_azid=ttt.first;
+          max_num=ttt.second.size();
+        } 
+        for(auto const & ddddd:ttt.second)
+        {
+          temp_rnages.push_back(ddddd);
+        }
+        
+      }
+      
+      AZ_updated_idxrange.clear();
+      AZ_updated_idxrange[max_azid]=temp_rnages;
+      std::cerr<<"merge azid "<<max_azid<<'\n';
+    }
+      
+
+    
+    fill_data_location(key,temp_stripe, shard_size, padding, AZ_updated_idxrange, response);
+
+    //ECPURCW  
+    if(idx_ranges.size()>1)
+    {
+      //ECPURCW  
+      
+      //version control
+      for(auto const & dddd:idx_ranges)
+      {
+        int data_idx=dddd.shardidx;
+        int old_data_version=m_data_block_version.at(stripeid)[data_idx];
+        int new_data_version=old_data_version+1;
+         m_data_block_version.at(stripeid)[data_idx]=new_data_version;
+      }
+      //把old version删掉，eltaP 有的布局说明都需要垃圾回收
+      if(m_temp_old_stripe_version.find(stripeid)!=m_temp_old_stripe_version.end())
+      {
+        std::cout<<"stripe id:"<<stripeid<<" old v_version: \n";
+        for(auto const & a : m_temp_old_stripe_version.at(stripeid)) std::cout<<a<<' ';
+        std::cout<<std::endl;
+        m_temp_old_stripe_version.erase(stripeid);
+      }
+
+      std::cout<<"erase it, and stripe id:"<<stripeid<<" latest v_version: \n";
+      for(auto const & a : m_data_block_version.at(stripeid))
+      {
+        std::cout<<a<<' ';
+      } 
+      std::cout<<std::endl;
+     
+      //fill RCW notice
+      proxy_proto::VersionRCWNotice version_rcw_notice;
+      for(auto const & a : m_data_block_version.at(stripeid))
+      {
+        version_rcw_notice.add_v_version(a);
+      } 
+
+      auto rcw_notice=version_rcw_notice.mutable_base_rcw_info();
+      rcw_notice->set_stripeid(temp_stripe.Stripe_id);
+      rcw_notice->set_k(temp_stripe.k);
+      rcw_notice->set_m(temp_stripe.g_m);
+      rcw_notice->set_real_l(temp_stripe.real_l);
+      rcw_notice->set_shard_size(temp_stripe.shard_size);
+      rcw_notice->set_encode_type(temp_stripe.encodetype);
+      for (int idx = 0; idx < temp_stripe.nodes.size(); idx++)
+      {
+        std::cout << idx << "   ";
+        Nodeitem &tnode = m_Node_info[temp_stripe.nodes[idx]];
+        rcw_notice->add_nodeip(tnode.Node_ip);
+        rcw_notice->add_nodeport(tnode.Node_port);
+      }
+
+      //m_metho=RCW  
+      m_mutex.lock();
+      m_updating_az_num=1;
+      m_PU_update_method=OppoProject::ECPUReconstrucWrite;
+      std::cerr << "updating az num: " << m_updating_az_num << std::endl;
+      m_PURMWupdating_stripeid=temp_stripe.Stripe_id;
+      m_PURMWupdating_AZid=AZ_updated_idxrange.begin()->first;
+      m_mutex.unlock();
+      
+      //rpc
+      grpc::ClientContext handle_ctx;
+      proxy_proto::DataProxyReply data_proxy_reply;
+      grpc::Status status;
+      int az_id=AZ_updated_idxrange.begin()->first;
+      std::cout << "EPUC reconstructor rpc:" << az_id << std::endl;
+      std::string selected_proxy_ip = m_AZ_info[az_id].proxy_ip;
+      int selected_proxy_port = m_AZ_info[az_id].proxy_port;
+      std::string choose_proxy = selected_proxy_ip + ":" + std::to_string(selected_proxy_port);
+      status = m_proxy_ptrs[choose_proxy]->VersionedRCW(&handle_ctx,version_rcw_notice,&data_proxy_reply);
+      if(!status.ok()){
+        std::cout<<"rpc data proxy failed: "<<az_id<<std::endl;
+        return grpc::Status::CANCELLED;
+      } 
+      return grpc::Status::OK;
+      //之后client向proxy发送，之后PURMWcheckfinish
+      //proxy detach一个线程
+    }
+    else
+    {
+      //ECPU RMW
+      return RPCPURMW( stripeid,idx_ranges,
+                     shard_update_offset, shard_update_len,
+                      AZ_updated_idxrange, key,
+                       AZ_global_parity_idx,AZ_local_parity_idx,
+                       minimal_tolerance,max_wait_time_ms);
+    }
+  }
+  
+  grpc::Status CoordinatorImpl::PURMWGetLocation(::grpc::ServerContext *context,
+                      const coordinator_proto::PURMWPrepareReq *request,
+                      coordinator_proto::UpdateDataLocation *data_location)
+  {
+    auto update_pre_req = request->update_pre_req();
+    int  minimal_tolerance = request->minimal_tolerance();
+    int  max_wait_time_ms = request->max_wait_time_ms();
+    std::string key=update_pre_req.key();
+    int update_offset_infile=update_pre_req.offset();
+    int update_length=update_pre_req.length();
+
+
+    auto updated_stripe_shards = split_update_length(key, update_offset_infile, update_length); // stripeid->updated_shards
+    std::map<int, std::vector<ShardidxRange>> AZ_updated_idxrange;
+    std::map<int, std::vector<int>> AZ_global_parity_idx;
+    std::map<int, std::vector<int>> AZ_local_parity_idx;
+
+    int stripeid = updated_stripe_shards.begin()->first;
+    auto idx_ranges = updated_stripe_shards.begin()->second;
+
+    /*2. split in AZ*/
+    split_AZ_info(stripeid, idx_ranges, AZ_updated_idxrange, AZ_global_parity_idx, AZ_local_parity_idx);
+
+    /*3. fill reply to client*/
+
+    m_mutex.lock();
+    StripeItem &temp_stripe = m_Stripe_info[stripeid];
+    m_mutex.unlock();
+
+    int shard_update_len = 0;    // to inform AZ
+    int shard_update_offset = 0; // to inform AZ
+    int shard_size = temp_stripe.shard_size;
+    bool padding = idx_ranges.size() > 1 ? true : false;//小对象肯定1个shard 更新 
+    if (padding)
+    {
+      shard_update_offset = 0;
+      shard_update_len = shard_size;
+    }
+    else
+    {
+      if (idx_ranges.size() == 0)
+        std::cout << "no updated shard!" << std::endl;
+      shard_update_offset = idx_ranges[0].offset_in_shard;
+      shard_update_len = idx_ranges[0].range_length;
+    }
+    fill_data_location(key,temp_stripe, shard_size, padding, AZ_updated_idxrange, data_location);
+
+    /*4.fill RMW notice*/
+    //std::unordered_map<int, proxy_proto::DataProxyUpdatePlan> dataproxy_notices; // azid->notice
+    //fill_update_plan(dataproxy_notices,AZ_updated_idxrange,key,temp_stripe,shard_update_offset,shard_update_len);
+  
+    /*5. PUNotice and version */
+    
+    /*5.1  version control*/ 
+    // if(idx_ranges.size()<1) std::cout<<"split finds no update block\n";
+    // int data_idx=idx_ranges[0].shardidx;
+    // int old_data_version=m_data_block_version.at(stripeid)[data_idx];
+    // if(m_temp_old_stripe_version.find(stripeid)==m_temp_old_stripe_version.end())
+    // {
+    //   m_temp_old_stripe_version[stripeid]=m_data_block_version.at(stripeid);
+    // }
+    // int new_data_version=old_data_version+1;
+    // m_data_block_version.at(stripeid)[data_idx]=new_data_version;
+    // /* for debug*/ 
+    // std::cout<<"stripe id:"<<stripeid<<" oldest v_version: \n";
+    // for(auto const & a : m_temp_old_stripe_version.at(stripeid)) std::cout<<a<<' ';
+    // std::cout<<std::endl;
+
+    // std::cout<<"stripe id:"<<stripeid<<" latest v_version: \n";
+    // for(auto const & a : m_data_block_version.at(stripeid)) std::cout<<a<<' ';
+    // std::cout<<std::endl;
+
+    // std::cout<<"updated idx: "<<data_idx<<" old version: "<<old_data_version<<std::endl;
+  
+    // /*5.1  fill PUNotice*/ 
+
+    // std::unordered_map<int, proxy_proto::PURMWNotice> PURMW_dataproxy_notices; 
+
+    // for(auto const & t_notice : dataproxy_notices)
+    // {
+    //   proxy_proto::PURMWNotice purmw_notice;
+    //   auto* data_proxy_plan = purmw_notice.mutable_data_proxy_plan();
+
+    //   // 将 t_notice.second 的内容复制到 data_proxy_plan 中
+    //   *data_proxy_plan = t_notice.second;
+    //   purmw_notice.set_minimal_tolerance(temp_stripe.g_m - minimal_tolerance);
+    //   purmw_notice.set_max_wait_time_ms(max_wait_time_ms);
+    //   auto latest_v_version=m_data_block_version.at(stripeid);
+    //   for(auto const & vvv:latest_v_version) purmw_notice.add_latest_data_version(vvv);
+    //   PURMW_dataproxy_notices[t_notice.first]=purmw_notice;
+    //   // 将 purmw_notice 添加到 PURMW_dataproxy_notices 中
+    //   PURMW_dataproxy_notices.emplace(t_notice.first, std::move(purmw_notice));
+    // }
+
+    // /*6 rpc*/
+    // /* need to modify set clock*/
+    // m_mutex.lock();
+    // m_updating_az_num = dataproxy_notices.size();
+    // std::cout << "updating az num: " << m_updating_az_num << std::endl;
+    // m_PURMWupdating_stripeid=temp_stripe.Stripe_id;
+    // m_PURMWupdating_AZid=PURMW_dataproxy_notices.begin()->first;
+    // m_mutex.unlock();
+    // /*7. rpc*/
+    // if(PURMW_dataproxy_notices.size()!=1) std::cout<<"to many or few PURMW AZ ,num: "<<PURMW_dataproxy_notices.size()<<std::endl;
+    // for(auto const & temp_notice : PURMW_dataproxy_notices)
+    // {
+    //   grpc::ClientContext handle_ctx;
+    //   proxy_proto::PURMWResponse PURWM_proxy_reply;
+    //   grpc::Status status;
+    //   int az_id = temp_notice.first;
+    //   std::cout << "RMWPU data proxy rpc AZid:" << az_id << std::endl;
+    //   std::string selected_proxy_ip = m_AZ_info[az_id].proxy_ip;
+    //   int selected_proxy_port = m_AZ_info[az_id].proxy_port;
+    //   std::string choose_proxy = selected_proxy_ip + ":" + std::to_string(selected_proxy_port);
+    //   status = m_proxy_ptrs[choose_proxy]->dataProxyPURMW(&handle_ctx, temp_notice.second,&PURWM_proxy_reply);
+    //   if(!status.ok()){
+    //     std::cout<<"rpc data proxy failed: "<<az_id<<std::endl;
+    //     return grpc::Status::CANCELLED;
+    //   } 
+    // }
+
+    // /*8. set wait */
+    //  // 尝试锁定 mutex
+    // if (m_PU_Meta_lock.try_lock()) 
+    // {
+    //     std::cout << "mutex 已经被成功锁定！" << std::endl;
+    //     m_PU_Meta_lock.unlock(); // 必须手动解锁
+    // } 
+    // else 
+    // {
+    //   std::cout << "mutex 没有被成功锁定！" << std::endl;
+    // }
+    // if (m_mutex.try_lock()) 
+    // {
+    //     std::cout << "mutex 已经被成功锁定！" << std::endl;
+    //     m_mutex.unlock(); // 必须手动解锁
+    // } 
+    // else 
+    // {
+    //   std::cout << "mutex 没有被成功锁定！" << std::endl;
+    // }
+
+    // return grpc::Status::OK;
+
+    return RPCPURMW( stripeid,idx_ranges,
+                     shard_update_offset, shard_update_len,
+                      AZ_updated_idxrange, key,
+                       AZ_global_parity_idx,AZ_local_parity_idx,
+                       minimal_tolerance,max_wait_time_ms);
+    
+
+  }
+
+
   grpc::Status CoordinatorImpl::updateReportSuccess(::grpc::ServerContext *context,
                                                     const coordinator_proto::CommitAbortKey *request,
                                                     coordinator_proto::ReplyFromCoordinator *response)
@@ -2243,7 +2564,7 @@ namespace OppoProject
         }
         if (m_updating_az_num == 1) //RCW 唤醒重构线程发送命令进行重构
           cv.notify_all();
-        if (m_updating_az_num == 0)
+        if (m_updating_az_num == 0)//唤醒checkUpdateFinished   ，向client返回更新成功的消息
           cv.notify_all();
       }
       else
@@ -2274,6 +2595,94 @@ namespace OppoProject
     /*待补充*/
     return grpc::Status::OK;
   }
+
+  grpc::Status CoordinatorImpl::RPCPURMW(int stripeid,std::vector<OppoProject::ShardidxRange> idx_ranges,
+                          int shard_update_offset,int shard_update_len,
+                          std::map<int, std::vector<ShardidxRange>> &AZ_updated_idxrange,std::string key,
+                          std::map<int, std::vector<int>>& AZ_global_parity_idx,std::map<int, std::vector<int>> &AZ_local_parity_idx,
+                          int minimal_tolerance,int max_wait_time_ms)
+  {
+    StripeItem &temp_stripe = m_Stripe_info[stripeid];
+    /*4.fill RMW notice*/
+    std::unordered_map<int, proxy_proto::DataProxyUpdatePlan> dataproxy_notices; // azid->notice
+    fill_update_plan(dataproxy_notices,AZ_updated_idxrange,key,temp_stripe,shard_update_offset,shard_update_len);
+  
+    /*5. PUNotice and version */
+
+    /*5.1  version control,only one block update*/ 
+    if(idx_ranges.size()<1) std::cout<<"split finds no update block\n";
+    int data_idx=idx_ranges[0].shardidx;
+    int old_data_version=m_data_block_version.at(stripeid)[data_idx];
+    if(m_temp_old_stripe_version.find(stripeid)==m_temp_old_stripe_version.end())
+    {
+      m_temp_old_stripe_version[stripeid]=m_data_block_version.at(stripeid);
+    }
+    int new_data_version=old_data_version+1;
+    m_data_block_version.at(stripeid)[data_idx]=new_data_version;
+    /* for debug*/ 
+    std::cout<<"stripe id:"<<stripeid<<" oldest v_version: \n";
+    for(auto const & a : m_temp_old_stripe_version.at(stripeid)) std::cout<<a<<' ';
+    std::cout<<std::endl;
+
+    std::cout<<"stripe id:"<<stripeid<<" latest v_version: \n";
+    for(auto const & a : m_data_block_version.at(stripeid)) std::cout<<a<<' ';
+    std::cout<<std::endl;
+
+    std::cout<<"updated idx: "<<data_idx<<" old version: "<<old_data_version<<std::endl;
+  
+    /*5.1  fill PUNotice*/ 
+
+    std::unordered_map<int, proxy_proto::PURMWNotice> PURMW_dataproxy_notices; 
+
+    for(auto const & t_notice : dataproxy_notices)
+    {
+      proxy_proto::PURMWNotice purmw_notice;
+      auto* data_proxy_plan = purmw_notice.mutable_data_proxy_plan();
+
+      // 将 t_notice.second 的内容复制到 data_proxy_plan 中
+      *data_proxy_plan = t_notice.second;
+      purmw_notice.set_minimal_tolerance(temp_stripe.g_m - minimal_tolerance);
+      purmw_notice.set_max_wait_time_ms(max_wait_time_ms);
+      auto latest_v_version=m_data_block_version.at(stripeid);
+      for(auto const & vvv:latest_v_version) purmw_notice.add_latest_data_version(vvv);
+      PURMW_dataproxy_notices[t_notice.first]=purmw_notice;
+      // 将 purmw_notice 添加到 PURMW_dataproxy_notices 中
+      PURMW_dataproxy_notices.emplace(t_notice.first, std::move(purmw_notice));
+    }
+
+    /*6 rpc*/
+    /* need to modify set clock*/
+    m_mutex.lock();
+    m_updating_az_num = dataproxy_notices.size();
+    std::cout << "updating az num: " << m_updating_az_num << std::endl;
+    m_PURMWupdating_stripeid=temp_stripe.Stripe_id;
+    m_PURMWupdating_AZid=PURMW_dataproxy_notices.begin()->first;
+    m_PU_update_method=OppoProject::ECPURModifyWrite;
+    m_mutex.unlock();
+    /*7. rpc*/
+    if(PURMW_dataproxy_notices.size()!=1) std::cout<<"to many or few PURMW AZ ,num: "<<PURMW_dataproxy_notices.size()<<std::endl;
+    for(auto const & temp_notice : PURMW_dataproxy_notices)
+    {
+      grpc::ClientContext handle_ctx;
+      proxy_proto::PURMWResponse PURWM_proxy_reply;
+      grpc::Status status;
+      int az_id = temp_notice.first;
+      std::cout << "RMWPU data proxy rpc AZid:" << az_id << std::endl;
+      std::string selected_proxy_ip = m_AZ_info[az_id].proxy_ip;
+      int selected_proxy_port = m_AZ_info[az_id].proxy_port;
+      std::string choose_proxy = selected_proxy_ip + ":" + std::to_string(selected_proxy_port);
+      status = m_proxy_ptrs[choose_proxy]->dataProxyPURMW(&handle_ctx, temp_notice.second,&PURWM_proxy_reply);
+      if(!status.ok()){
+        std::cout<<"rpc data proxy failed: "<<az_id<<std::endl;
+        return grpc::Status::CANCELLED;
+      } 
+    }
+    return grpc::Status::OK;
+  }
+
+
+
+
 
   std::map<unsigned int, std::vector<ShardidxRange>>
   CoordinatorImpl::split_update_length(std::string key, int update_offset_infile, int update_length)
@@ -2406,6 +2815,53 @@ namespace OppoProject
     int update_length=request->length();
     if(RMW(key,update_offset_infile,update_length,data_location)) return grpc::Status::OK;
     else return grpc::Status::CANCELLED;
+  }
+
+  grpc::Status 
+  CoordinatorImpl::printVersion(::grpc::ServerContext *context,
+                     const coordinator_proto::printVersionReq* request, 
+                     coordinator_proto::printVersionResponse* response)
+  {
+    std::cout<<"print version \n";
+    if(request->printallstripes())
+    {
+      for(auto const &a:m_data_block_version)
+      {
+        std::cout<<"sid:"<<a.first<<std::endl;
+        std::cout<<"data version \n";
+        for(auto const & t:a.second) std::cout<<t<<' ';
+        std::cout<<'\n';
+        auto stripe_id=a.first;
+        std::cout<<"parity version \n";
+        for(auto const & t:m_parity_block_version[stripe_id])
+        {
+          for(auto const &vnum:t)
+          {
+            std::cout<<vnum<<' ';
+          }
+          std::cout<<'\n';
+        }
+        
+      }
+    }
+    else
+    {
+      std::string key=request->key();
+      for(auto const & sid:m_object_table_big_small_commit[key].stripes)
+      {
+        for(auto const & vnmu:m_data_block_version[sid]) std::cout<<vnmu<<' ';
+        std::cout<<std::endl;
+        for(auto const & t:m_parity_block_version[sid])
+        {
+          for(auto const &vnum:t)
+          {
+            std::cout<<vnum<<' ';
+          }
+          std::cout<<'\n';
+        }
+      }
+    }
+    return grpc::Status::OK;
   }
 
   bool CoordinatorImpl::RMW(std::string key, int update_offset_infile, int update_length, coordinator_proto::UpdateDataLocation *data_location)
@@ -2837,6 +3293,261 @@ namespace OppoProject
         data_location->add_lengthinshard(t_idxranges[i].range_length);
       }
     }
+    return true;
+  }
+
+  
+  bool CoordinatorImpl::fill_update_plan(std::unordered_map<int, proxy_proto::DataProxyUpdatePlan> &dataproxy_notices,
+                                          const std::map<int, std::vector<ShardidxRange>> &AZ_updated_idxrange,
+                                          std::string key,StripeItem temp_stripe,int shard_update_offset,int shard_update_len)
+  {
+    for (auto const &t_item : AZ_updated_idxrange)
+    {
+      proxy_proto::DataProxyUpdatePlan notice;
+      notice.set_key(key);
+      notice.set_stripeid(temp_stripe.Stripe_id);
+
+      // data shard
+      int azid = t_item.first;
+      auto t_idxranges = t_item.second;
+      std::cout << " AZ: " << azid << std::endl;
+      proxy_proto::StripeUpdateInfo *az_stripe_info = notice.mutable_client_info();
+
+      for (int i = 0; i < t_idxranges.size(); i++)
+      {
+        int idx = t_idxranges[i].shardidx;
+        az_stripe_info->add_receive_client_shard_idx(idx);
+        std::cout << "  " << idx;
+        az_stripe_info->add_receive_client_shard_offset(t_idxranges[i].offset_in_shard); //no use
+        az_stripe_info->add_receive_client_shard_length(t_idxranges[i].range_length);//no use
+        Nodeitem &tnode = m_Node_info[temp_stripe.nodes[idx]];
+        az_stripe_info->add_data_nodeip(tnode.Node_ip);
+        az_stripe_info->add_data_nodeport(tnode.Node_port);
+      }
+
+      std::cout <<std::endl;
+
+      // local parity，把所有的local idx以及node 信息传给proxy，因为是读改写
+      std::vector<int> local_parity_idxes ;
+      for (int ccc = temp_stripe.k+ temp_stripe.g_m; ccc < temp_stripe.nodes.size(); ccc++)
+        local_parity_idxes.push_back(ccc);
+      
+      for (auto const &idx : local_parity_idxes)
+      {
+        std::cout << idx << "   ";
+        az_stripe_info->add_local_parity_idx(idx);
+        Nodeitem &tnode = m_Node_info[temp_stripe.nodes[idx]];
+        az_stripe_info->add_local_parity_nodeip(tnode.Node_ip);
+        az_stripe_info->add_local_parity_nodeport(tnode.Node_port);
+      }
+      // global parity
+      std::vector<int> global_parity_idxes;
+      for (int ccc = temp_stripe.k; ccc < temp_stripe.k + temp_stripe.g_m; ccc++)
+        global_parity_idxes.push_back(ccc);
+
+      for (auto const &idx : global_parity_idxes)
+      {
+        std::cout << idx << "   ";
+        az_stripe_info->add_global_parity_idx(idx);
+        Nodeitem &tnode = m_Node_info[temp_stripe.nodes[idx]];
+        az_stripe_info->add_global_parity_nodeip(tnode.Node_ip);
+        az_stripe_info->add_global_parity_nodeport(tnode.Node_port);
+      }
+      std::cout << std::endl;
+
+      // std::cout<<"set collector in notice"<<notice.collector_proxyip()<<' '<<notice.collector_proxyport()<<std::endl;
+      notice.set_encode_type((int)temp_stripe.encodetype);
+      notice.set_k(temp_stripe.k);
+      notice.set_real_l(temp_stripe.real_l);
+      notice.set_g_m(temp_stripe.g_m);
+      notice.set_shard_update_len(shard_update_len);
+      notice.set_shard_update_offset(shard_update_offset);
+      dataproxy_notices[azid] = notice;
+    }
+    return true;
+  }
+
+
+  grpc::Status
+  CoordinatorImpl::PURMWCheckFinished(::grpc::ServerContext *context,
+                      const coordinator_proto::AskRMWPUSucess *request,
+                      coordinator_proto::RepIfSetSucess *response)
+  {
+    
+    auto key=request->key();
+    auto max_wait_ms=request->max_wait_time_ms();
+    std::cv_status cv_stat;
+    {
+      std::unique_lock<std::mutex> lck(m_mutex);
+      while (m_updating_az_num > 0)
+      {
+        std::cout<<"check finished watiing for "<<m_updating_az_num<<" return\n";
+        cv.wait(lck);
+      }
+    }
+    
+    std::cerr<<"awake \n";
+    if(m_updating_az_num < 0)
+    {
+      std::cerr << "check finish <0 aznum" << std::endl;
+      return grpc::Status::CANCELLED;
+    }
+
+    /*重构写*/
+    if(m_PU_update_method==OppoProject::ECPUReconstrucWrite)
+    {
+      /*返回成功*/
+      m_PURMWupdating_stripeid=-1;
+      m_PURMWupdating_AZid=-1;
+      response->set_ifcommit(true);
+      return grpc::Status::OK;
+    }
+    else
+    {
+      if(m_PURMWupate_stat==OppoProject::PURMWSuccess)
+      {
+        m_PURMWupdating_stripeid=-1;
+        m_PURMWupdating_AZid=-1;
+        std::cerr<<"befor check \n";
+        response->set_ifcommit(true);
+        return grpc::Status::OK;
+      }
+      else if(m_PURMWupate_stat==OppoProject::FailAndReceiveNewData)/*TimeoutRCW*/
+      {
+        std::cerr<<"PURMW wait out of time,but save new data,start to reconstruct\n";
+        /*wxh 2024-3-15 to do RCW,and clear version*/
+        //不用上锁，直接等着就行
+        proxy_proto::ReconstructWriteNotice reconstructor_notice;
+        fill_reconstruct_write_plan(reconstructor_notice,m_PURMWupdating_stripeid);
+        grpc::ClientContext handle_ctx;
+        proxy_proto::DataProxyReply data_proxy_reply;
+        grpc::Status status;
+        std::cerr << "PURMW timeout reconstructor rpc:" << m_PURMWupdating_AZid << std::endl;
+        if(m_PURMWupdating_AZid<0)  std::cerr << "reconstructor az wrong" << m_PURMWupdating_AZid << std::endl;
+        std::string selected_proxy_ip = m_AZ_info.at(m_PURMWupdating_AZid).proxy_ip;
+        std::cerr<<"0000000\n";
+        int selected_proxy_port = m_AZ_info[m_PURMWupdating_AZid].proxy_port;
+        std::cerr<<"111111111111\n";
+        std::string choose_proxy = selected_proxy_ip + ":" + std::to_string(selected_proxy_port);
+        std::cerr<<"22222222222\n"<<choose_proxy;
+        status = m_proxy_ptrs[choose_proxy]->TimeoutRCW(&handle_ctx, reconstructor_notice, &data_proxy_reply);
+        m_updating_az_num=0;
+        if(status.ok()) 
+        {
+          std::cerr << "PURMW timeout & RCW completed:" << m_PURMWupdating_AZid << std::endl;
+          return grpc::Status::OK;
+        }
+        else
+        {
+          std::cerr << "PURMW timeout & RCW failed:" << m_PURMWupdating_AZid << std::endl;
+          return grpc::Status::CANCELLED;
+        }
+      }
+      else if(m_PURMWupate_stat==OppoProject::FailAndNoNewData)
+      {
+        std::cerr<<"PURMW wait out of time,client need  to send new data to reconstruct\n";
+        return grpc::Status::CANCELLED;
+        /*to do */
+      }
+    }
+    return grpc::Status::OK;
+  }
+
+  grpc::Status
+  CoordinatorImpl::PURMWReportSuccess(::grpc::ServerContext *context,
+                      const coordinator_proto::PURMWCoordinatorReply *request,
+                      coordinator_proto::ReplyFromCoordinator *response)
+  {
+    auto stripeid=request->stripeid();
+    auto dataidx=request->dataidx();
+    auto dataversion=request->dataversion();
+    auto purmw_result_stat=request->purmw_result();
+    std::cerr<<stripeid<<' '<<dataidx<<" "<<dataversion<<std::endl;
+
+    std::cerr<<std::endl;
+    
+    try
+    {
+      /* code */
+      std::lock_guard<std::mutex> lck(m_mutex);
+      auto k=m_Stripe_info.at(stripeid).k;
+      auto m=m_Stripe_info.at(stripeid).g_m;
+      auto real_l=m_Stripe_info.at(stripeid).real_l;
+      auto encode_type=m_Stripe_info.at(stripeid).encodetype;
+      int delta_send_num=0;
+      if(encode_type==RS) delta_send_num=m;
+      else if(encode_type==OppoProject::OPPO_LRC) delta_send_num=m+real_l;
+      else if(encode_type==OppoProject::Azure_LRC_1) delta_send_num=m+real_l+1;
+      //std::cout<<"proxy report update success: "<<key<<std::endl;
+
+      m_PURMWupate_stat=purmw_result_stat;
+      auto success_parity_idxes=request->success_parity_ids();
+      for(auto const &ddddd : success_parity_idxes ) std::cerr<<" "<<ddddd;
+      if(purmw_result_stat==OppoProject::PURMWSuccess)
+      {
+        std::cerr<<"v_ver_len: "<<delta_send_num<<'\n';
+        std::vector<int> temp_pairty_idxes(delta_send_num,0);
+        for (const auto & element : success_parity_idxes) {
+          // 打印每个元素的值
+          temp_pairty_idxes.at(element-k)=1;
+          std::cout << "Element: " << element << std::endl;
+        }
+        m_partial_update_placement[stripeid][dataidx][dataversion]=temp_pairty_idxes;
+      }
+      m_updating_az_num--;
+      if(m_updating_az_num==0)
+      {
+        std::cerr<<"notify \n";
+        cv.notify_all();
+        std::cerr<<"after notify \n";
+      }
+      else
+      {
+        std::cout<<"WRONG AZ num\n";
+      }
+    }
+    catch(const std::exception& e)
+    {
+      std::cerr<<" sth rwong\n";
+      std::cerr << e.what() << '\n';
+      std::cerr<<" sth rwong22\n";
+      response->set_message("no");
+      return grpc::Status::CANCELLED;
+    }
+    response->set_message("yes");
+    return grpc::Status::OK;
+  }
+
+
+  bool CoordinatorImpl::fill_reconstruct_write_plan(proxy_proto::ReconstructWriteNotice &reconstructor_notice,int stripeid)
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    try
+    {
+      /* code */
+      auto temp_stripe=m_Stripe_info.at(stripeid); 
+      reconstructor_notice.set_stripeid(temp_stripe.Stripe_id);
+      reconstructor_notice.set_k(temp_stripe.k);
+      reconstructor_notice.set_m(temp_stripe.g_m);
+      reconstructor_notice.set_real_l(temp_stripe.real_l);
+      reconstructor_notice.set_shard_size(temp_stripe.shard_size);
+      reconstructor_notice.set_encode_type(temp_stripe.encodetype);
+      
+  
+      for (int idx = 0; idx < temp_stripe.nodes.size(); idx++)
+      {
+        std::cout << idx << "   ";
+        Nodeitem &tnode = m_Node_info[temp_stripe.nodes[idx]];
+        reconstructor_notice.add_nodeip(tnode.Node_ip);
+        reconstructor_notice.add_nodeport(tnode.Node_port);
+      }
+    }
+    catch(const std::exception& e)
+    {
+      std::cerr << e.what() << '\n';
+      return false;
+    }
+    
     return true;
   }
 

@@ -6,7 +6,7 @@
 #include <vector>
 #include "meta_definition.h"
 #include "azure_lrc.h"
-
+#include <map>
 
 
 class LogManager
@@ -26,9 +26,9 @@ public:
     ~LogManager()
     {
         if(log_file_ptr!=NULL)
-    {
-        fclose(log_file_ptr);
-    }
+        {
+            fclose(log_file_ptr);
+        }
         
     };
     

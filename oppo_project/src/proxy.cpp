@@ -7,6 +7,7 @@
 #include <thread>
 #include <cassert>
 #include <string>
+#include <iomanip>
 template <typename T>
 inline T ceil(T const &A, T const &B)
 {
@@ -32,7 +33,7 @@ namespace OppoProject
       std::cout << "SetToMemcached"
                 << " " << std::string(ip) << " " << port << std::endl;
       
-      std::cout<<"log path: "<<"/home/wxh/Documents/oppoEC/OOPPO/log/datanode/node"<<std::to_string(port%1000)<<".log"<<std::endl;
+      std::cout<<"log path: "<<"/home/wxh/Documents/oppoEC/OOPPO/log/datanode/node"<<std::setw(3) << std::setfill('0')<<port%1000<<".log"<<std::endl;
 
       asio::ip::tcp::resolver resolver(io_context);
       asio::ip::tcp::resolver::results_type endpoint = resolver.resolve(std::string(ip), std::to_string(port));
@@ -54,6 +55,59 @@ namespace OppoProject
       std::string str(value,value_length);
       std::cout << "Value to Set is :"
                 << " " << str << std::endl;
+      std::vector<char> finish(1);
+      asio::read(socket, asio::buffer(finish, finish.size()));
+
+      asio::error_code ignore_ec;
+      socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignore_ec);
+      socket.close(ignore_ec);
+    }
+    catch (std::exception &e)
+    {
+      std::cout << e.what() << std::endl;
+    }
+
+    // std::cout << "set " << std::string(key) << " " << std::string(ip) << " " << port << " " << (MEMCACHED_SUCCESS==rc) << " " << value_length << std::endl;
+    return true;
+  }
+  bool ProxyImpl::VersionedBlockToNode(const char *key, size_t key_length, const char *value, size_t value_length, const char *ip, int port,std::vector<int> v_version,
+                             int idx,int k,OppoProject::DataNodeOp datanode_op)
+  {
+     try
+    {
+      std::cout << "DataSetToDataNodeWithVersion"
+                << " " << std::string(ip) << " " << port << std::endl;
+      
+      std::cout<<"log path: "<<"/home/wxh/Documents/oppoEC/OOPPO/log/datanode/node"<<std::setw(3) <<std::setfill('0')<<port%1000<<".log"<<std::endl;
+
+      asio::ip::tcp::resolver resolver(io_context);
+      asio::ip::tcp::resolver::results_type endpoint = resolver.resolve(std::string(ip), std::to_string(port));
+      asio::ip::tcp::socket socket(io_context);
+      asio::connect(socket, endpoint);
+
+      int flag = datanode_op;
+      OppoProject::send_int(socket,flag);
+      OppoProject::send_int(socket,key_length);
+      OppoProject::send_int(socket,value_length);
+      asio::write(socket, asio::buffer(key, key_length));
+      asio::write(socket, asio::buffer(value, value_length));
+
+      //send verison
+      if(idx<k)//data block version
+      {
+        OppoProject::send_int(socket,v_version[idx]);
+      }
+      else//v_versoin
+      {
+        OppoProject::send_vec_int(socket,v_version);
+      }
+
+      /*for debug*/
+      std::string str(value,value_length);
+      std::cout << "Value to Set is :"
+                << " " << str << std::endl;
+
+      /*check success*/
       std::vector<char> finish(1);
       asio::read(socket, asio::buffer(finish, finish.size()));
 
@@ -304,15 +358,20 @@ namespace OppoProject
           char *buf = v_buf.data();
           auto send_to_datanode = [this](int j, int k, std::string shard_id, char **data, char **coding, int x_shard_size, std::pair<std::string, int> ip_and_port)
           {
+            std::vector<int> v_version(k,0);
             if (j < k)
             {
               //SetToMemcached(shard_id.c_str(), shard_id.size(), data[j], x_shard_size, ip_and_port.first.c_str(), ip_and_port.second);
-              DataSetToDisk(shard_id.c_str(), shard_id.size(), data[j], x_shard_size, ip_and_port.first.c_str(), ip_and_port.second,OppoProject::initial_version_num);
+              this->VersionedBlockToNode(shard_id.c_str(),shard_id.size(), data[j],  x_shard_size, ip_and_port.first.c_str(), ip_and_port.second,v_version,
+                                j,k, OppoProject::DiskDataSetWithVersion);
+              //DataSetToDisk(shard_id.c_str(), shard_id.size(), data[j], x_shard_size, ip_and_port.first.c_str(), ip_and_port.second,OppoProject::initial_version_num);
             }
             else
             {
               //SetToMemcached(shard_id.c_str(), shard_id.size(), coding[j - k], x_shard_size, ip_and_port.first.c_str(), ip_and_port.second);
-              ParitySetToDisk(shard_id.c_str(), shard_id.size(), coding[j - k], x_shard_size, ip_and_port.first.c_str(), ip_and_port.second,std::vector<int>(k,OppoProject::initial_version_num));
+              this->VersionedBlockToNode(shard_id.c_str(),shard_id.size(),coding[j - k],  x_shard_size, ip_and_port.first.c_str(), ip_and_port.second,v_version,
+                                j,k, OppoProject::DiskParitySetWithVersion);
+              //ParitySetToDisk(shard_id.c_str(), shard_id.size(), coding[j - k], x_shard_size, ip_and_port.first.c_str(), ip_and_port.second,std::vector<int>(k,OppoProject::initial_version_num));
             }
           };
           for (int i = 0; i < int(stripe_ids.size()); i++)
@@ -3049,6 +3108,7 @@ namespace OppoProject
       {
         nodes_ip_and_port.push_back(std::make_pair(request.nodeip(i),request.nodeport(i)));
       }
+
       std::vector<char *> v_data(k);
       std::vector<char *> v_coding(m + real_l + 1);
       char **data = (char **)v_data.data();
@@ -3165,8 +3225,7 @@ namespace OppoProject
 
     return grpc::Status::OK;
     
-
-      
+     
   }
 
 
@@ -3182,9 +3241,7 @@ namespace OppoProject
       asio::ip::tcp::resolver::results_type endpoint = resolver.resolve(std::string(ip), std::to_string(port));
       asio::ip::tcp::socket socket(io_context);
       asio::connect(socket, endpoint);
-
-      int flag = 3;
-      OppoProject::send_int(socket,flag);
+      OppoProject::send_int(socket,3);
       OppoProject::send_int(socket,key_length);
       OppoProject::send_int(socket,update_data_length);
       std::cout<<"offset: "<<offset_in_shard<<" len: "<<update_data_length<<std::endl;
@@ -3256,6 +3313,63 @@ namespace OppoProject
     return true;
   }
 
+  bool ProxyImpl::PUDeltaSendToNode(const char *key,size_t key_length,int offset_in_shard,const char *update_data,size_t update_data_length,int delta_type,const char* ip,int port,
+                                    std::vector<int> &latest_v_version,int data_idx,int data_verion,int stripeid)
+  {
+    try
+    {
+      std::cout << "PUDeltaSendToNode"
+                << " " << std::string(ip) << " " << port << std::endl;
+      std::cout<<"log path: "<<"/home/wxh/Documents/oppoEC/OOPPO/log/datanode/node"<<std::to_string(port%1000)<<".log"<<std::endl;
+      std::cout << "key:"<<std::string(key)<<std::endl;
+      asio::ip::tcp::resolver resolver(io_context);
+      asio::ip::tcp::resolver::results_type endpoint = resolver.resolve(std::string(ip), std::to_string(port));
+      asio::ip::tcp::socket socket(io_context);
+      asio::connect(socket, endpoint);
+
+
+      //strat to send
+      OppoProject::send_int(socket,OppoProject::PUDeltaSetWithVersion);
+      OppoProject::send_int(socket,key_length);
+      OppoProject::send_int(socket,update_data_length);
+      std::cout<<"offset: "<<offset_in_shard<<" len: "<<update_data_length<<std::endl;
+      
+      asio::write(socket, asio::buffer(key, key_length));
+      asio::write(socket, asio::buffer(update_data, update_data_length));
+      
+      std::cout<<"send data is "<<std::endl;
+      std::cout<<std::string(update_data,update_data_length)<<std::endl;
+      std::cout<<std::endl;
+
+      OppoProject::send_int(socket,offset_in_shard);
+      OppoProject::send_int(socket,delta_type);
+
+
+      //send data idx version
+      OppoProject::send_int(socket,stripeid);
+      OppoProject::send_vec_int(socket,latest_v_version);
+      OppoProject::send_int(socket,data_idx);
+      OppoProject::send_int(socket,data_verion);
+
+
+      //
+
+      std::vector<char> finish(1);
+      asio::read(socket, asio::buffer(finish, finish.size()));
+
+      asio::error_code ignore_ec;
+      socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignore_ec);
+      socket.close(ignore_ec);
+
+    }
+    catch(const std::exception& e)
+    {
+      std::cerr << e.what() << '\n';
+    }
+    
+    return true;
+
+  }
 
   bool ProxyImpl::ReceiveDeltaFromeProxy(asio::ip::tcp::socket &socket,std::map<int,std::vector<char>> &idx_delta,int &offset,int &length,OppoProject::DeltaType &delta_type){
     try
@@ -3391,7 +3505,946 @@ namespace OppoProject
     return true;
     
   }
+
+  grpc::Status  ProxyImpl::dataProxyPURMW(
+        grpc::ServerContext* context, 
+        const proxy_proto::PURMWNotice* request, 
+        proxy_proto::PURMWResponse* response)
+  {
+    std::cout<<"there is RMW proxyPU"<<std::endl;
+    std::vector<int> latest_version;
+    for(int i=0;i<request->latest_data_version_size();i++)
+    {
+      latest_version.push_back(request->latest_data_version(i));
+    }
+    auto min_tolerace=request->minimal_tolerance();
+    auto max_wait_time=request->max_wait_time_ms();
+    auto receive_RMW_PU_update = [this](proxy_proto::DataProxyUpdatePlan data_proxy_plan,std::vector<int> latest_data_version,int min_tolerance,int max_wait_time_ms)
+    {
+      //从client收数据需要的结构：
+      std::unordered_map<int,OppoProject::ShardidxRange> data_idx_ranges; //idx->(idx,offset,length) 
+      std::unordered_map<int,std::pair<std::string, int>> data_nodes_ip_port;//idx->node ip port
+      
+      int offset_from_client;
+      int length_from_client;
+      int stripeid=data_proxy_plan.stripeid();
+
+      //相关
+      std::vector<int> localparity_idxes;
+      std::vector<int> globalparity_idxes;  
+      std::unordered_map<int,std::vector<char> > new_shard_data_map;//idx->data
+      std::unordered_map<int,std::vector<char> > old_shard_data_map;
+      std::unordered_map<int,std::vector<char> > cur_az_data_delta_map;//包括从proxy 接收以及本AZ计算得到的
+      int purmw_stat=OppoProject::FailAndNoNewData;
+      ClientUpdateInfoConvert(data_proxy_plan.client_info(),data_idx_ranges,localparity_idxes,globalparity_idxes,data_nodes_ip_port);
+      
+      for(auto const & tttt:data_nodes_ip_port)
+      {
+        std::cerr<<"idx: "<<tttt.first;
+        std::cerr<<"ip port: "<<tttt.second.first<<' '<<tttt.second.second;
+      }
+      try
+      {
+        
+        
+        auto read_from_datanode=[this](std::string shardid,int offset,int length,char *data,std::string nodeip,int port)
+        {
+          size_t temp_size;//
+          bool reslut=GetFromMemcached(shardid.c_str(),shardid.size(),data,&temp_size,offset,length,nodeip.c_str(),port);
+          if(!reslut){
+            std::cout<<"getting from data node fails"<<std::endl;
+            return;
+          } 
+        };
+        
+        //1. 从client接收
+        if(data_proxy_plan.client_info().receive_client_shard_idx_size()>0)
+        {
+          std::cout<<"waiting for client's connet"<<std::endl;
+          asio::ip::tcp::socket socket_data_dataproxy(io_context);
+          asio::error_code error;
+          acceptor.accept(socket_data_dataproxy,error);
+          if(error)
+          {
+            std::cout<<"client's connet wrong"<<std::endl;
+            std::cout<<error.message()<<std::endl;
+          }
+          OppoProject::Role role=(OppoProject::Role)OppoProject::receive_int(socket_data_dataproxy,error);
+          if(role!=OppoProject::RoleClient) std::cerr<<"wrong connection"<<std::endl;
+          ReceiveDataFromClient(socket_data_dataproxy,new_shard_data_map,offset_from_client,length_from_client,stripeid,error);
+          socket_data_dataproxy.shutdown(asio::ip::tcp::socket::shutdown_both, error);
+          socket_data_dataproxy.close(error);
+        }
+        /*开始计时*/
+        auto start_time = std::chrono::steady_clock::now();
+        auto max_duration = std::chrono::milliseconds(max_wait_time_ms);
+        // 获取结束时间点
+        auto max_end_time = start_time+max_duration;
+        
+
+        //1.2  同时将新数据暂存到proxy中
+        m_temp_new_shard_data_map.clear();
+        auto stripeid=data_proxy_plan.stripeid();
+        m_temp_updating_stripeid=stripeid;
+        m_temp_new_shard_data_map = new_shard_data_map;
+        m_temp_v_version.clear();
+        m_temp_v_version=latest_data_version;
+        purmw_stat=OppoProject::FailAndReceiveNewData;
+        //2. 给old data 以及delta分配空间
+        
+        std::cout<<"2. 给old data 以及delta分配空间"<<std::endl;;
+        for(auto const & ttt:data_idx_ranges)
+        {
+          int idx=ttt.first;
+          int len=data_idx_ranges[idx].range_length;
+          std::vector<char> old_data(len);
+          std::vector<char> data_delta(len);
+          old_shard_data_map[idx]=old_data;//need to assignment
+          cur_az_data_delta_map[idx]=data_delta;
+          std::cout<<"old and cur delta size:"<<old_shard_data_map[idx].size()<<" :"<<cur_az_data_delta_map[idx].size()<<std::endl;
+        }
+
+
+        //3. read old
+        for(auto const & ttt : data_idx_ranges){
+          int idx=ttt.first;
+          int offset=ttt.second.offset_in_shard;
+          int len=ttt.second.range_length;
+
+          std::cout<<"len receive from coordinator"<<std::endl;
+
+          std::string shardid=std::to_string(stripeid*1000+idx);
+          read_from_datanode(shardid,offset,len,old_shard_data_map[idx].data(),data_nodes_ip_port[idx].first,data_nodes_ip_port[idx].second);
+          std::cout<<"read shard:"<<shardid<<std::endl;
+        }
+
+        //4. 计算本AZ内 delta
+        std::vector<std::thread> delta_calculators;
+
+        for(auto const & ttt : data_idx_ranges){//read old
+          int idx=ttt.first;
+          int len=ttt.second.range_length;
+          //calculate_data_delta(new_shard_data_map[idx].data(),old_shard_data_map[idx].data(),cur_az_data_delta_map[idx].data(),len);
+        
+          delta_calculators.push_back(std::thread(calculate_data_delta,new_shard_data_map[idx].data(),old_shard_data_map[idx].data(),cur_az_data_delta_map[idx].data(),len));
+        }
+        
+        for(int i=0;i<delta_calculators.size();i++){
+          delta_calculators[i].join();
+        }
+        
+        //5. calculate parity delta
+
+        int k=data_proxy_plan.k();
+        int real_l=data_proxy_plan.real_l();
+        int m=data_proxy_plan.g_m();
+
+        std::cout<<"k: "<<k<<" real_l  :  "<<real_l<<" m: "<<m<<"\n";
+        OppoProject::EncodeType encode_type=(OppoProject::EncodeType) data_proxy_plan.encode_type();
+
+        std::vector<char*> all_update_data_delta_ptrs;
+        std::vector<int> all_update_data_idx;
+
+        std::vector<char *> v_coding(m + real_l + 1);
+        char **coding = (char **)v_coding.data();
+        std::vector<std::vector<char>> v_coding_area(m + real_l + 1, std::vector<char>(length_from_client));
+
+
+
+        for(auto const & iter:cur_az_data_delta_map)
+        {
+          all_update_data_delta_ptrs.push_back(const_cast<char*>(iter.second.data()));
+          all_update_data_idx.push_back(iter.first);
+        }
+
+        for (int j = 0; j < m + real_l + 1; j++)
+        {
+          coding[j] = v_coding_area[j].data();
+          bzero(coding[j],length_from_client);
+        }
+
+        RMW_encode(k,m,real_l,all_update_data_delta_ptrs.data(),coding,length_from_client,encode_type,all_update_data_idx);
+        
+        
+        std::cerr<<"1111\n";
+
+        //6. send parity delta to data node
+
+        auto saved_delta_parity_idx_ptr=std::make_shared<std::vector<int>>();
+        auto cv_ptr = std::make_shared<std::condition_variable>();
+        auto myLock_ptr=std::make_shared<std::mutex>();
+        std::cerr<<"1.55555555555\n";
+        int updated_data_idx=all_update_data_idx[0];
+        
+        std::cerr<<"2222\n";
+        /*for debug*/
+        std::cerr<<"received v_version: \n";
+        for(auto const & a: latest_data_version)
+          std::cerr<<a<<' ';
+        std::cerr<<latest_data_version.at(updated_data_idx);
+        int updated_data_version=latest_data_version[updated_data_idx];
+        std::cout<<"dataidx :"<<updated_data_idx<<"version: "<<updated_data_version<<std::endl;
+        std::cv_status cv_stat;
+        auto rmw_encode_over_time = std::chrono::steady_clock::now();
+
+        // 计算耗时
+        auto spent_duration = std::chrono::duration_cast<std::chrono::milliseconds>(rmw_encode_over_time - start_time);
+        
+        if(spent_duration>=max_duration)
+        {
+          /*to inform MDS timeout for debug*/
+          return;
+          std::cerr<<"no time\n";
+        }
+
+        auto left_duration=max_duration-spent_duration;
+
+
+        auto delta_to_datanode=[this,min_tolerance,saved_delta_parity_idx_ptr,myLock_ptr,cv_ptr](int stripe_id,int shard_idx,int offset_inshard,int blocksize,int j,char** coding,
+                                                                                  int deltatype,std::string node_ip,int node_port,std::vector<int> latest_v_version,int data_idx,int data_verion)
+        {
+          std::string shard_id = std::to_string(stripe_id * 1000 + shard_idx);
+          bool ret=PUDeltaSendToNode(shard_id.c_str(),shard_id.size(),offset_inshard,coding[j],blocksize,deltatype,node_ip.c_str(),node_port,
+                                     latest_v_version,data_idx,data_verion,stripe_id);
+          if(!ret)
+          {
+              std::cout << "getFromNode !ret" << std::endl;
+              return;
+          }
+
+          myLock_ptr->lock();
+          if(saved_delta_parity_idx_ptr->size()< min_tolerance)
+          {
+            std::cerr<<"parity : "<<shard_idx<<" return !\n";
+            saved_delta_parity_idx_ptr->push_back(shard_idx);
+            if(saved_delta_parity_idx_ptr->size() >=min_tolerance)
+            {
+              std::cerr<<saved_delta_parity_idx_ptr->size()<<"个 prity return ,inform MDS\n";
+              cv_ptr->notify_all();
+            }
+          }
+          myLock_ptr->unlock();
+        };
+
+        std::vector<std::thread> delta_senders;
+        int delta_send_num=0;
+        if(encode_type==RS) delta_send_num=m;
+        else if(encode_type==OppoProject::OPPO_LRC) delta_send_num=m+real_l;
+        else if(encode_type==OppoProject::Azure_LRC_1) delta_send_num=m+real_l+1;
+        if(all_update_data_idx.size()!=1) std::cout<<"PU RMW new data num wrong!\n";//for debug
+
+        for(int i=0;i<delta_send_num;i++)
+        {
+          int idx=i+k;
+          std::string shard_id=std::to_string(stripeid*1000+idx);
+          int dataversion=updated_data_version;
+          std::cout<<"in PU make senddelta thread,dataversion: "<<dataversion<<std::endl;
+          delta_senders.push_back(std::thread(delta_to_datanode,stripeid,idx,offset_from_client,length_from_client,i,coding,
+                                                                (int)OppoProject::ParityDelta,data_nodes_ip_port[idx].first,data_nodes_ip_port[idx].second,latest_data_version,updated_data_idx,dataversion));
+          //stripeid,idx,i,offset_from_client,coding,length_from_client,(int)OppoProject::ParityDelta,
+                                              //data_nodes_ip_port[idx].first,data_nodes_ip_port[idx].second,latest_data_version,updated_data_idx,std::move(dataversion)));
+        }
+
+        for(int i=0;i<delta_senders.size();i++) delta_senders[i].detach();
+
+        std::unique_lock<std::mutex> lck(*myLock_ptr);
+        while(saved_delta_parity_idx_ptr->size()<min_tolerance)
+        {
+          //cv_ptr->wait(lck);
+          cv_stat=cv_ptr->wait_for(lck,left_duration);
+        }
+
+        if(cv_stat==std::cv_status::timeout)
+        {
+          purmw_stat=OppoProject::FailAndReceiveNewData;
+          /*to inform MDS timeout commit fail */
+          try
+          {
+            /* code */
+            /*commitSuccess*/
+            coordinator_proto::PURMWCoordinatorReply purmw_report;
+
+            coordinator_proto::ReplyFromCoordinator result;
+            grpc::ClientContext context;
+
+
+            purmw_report.set_stripeid(stripeid);
+            purmw_report.set_dataidx(updated_data_idx);
+            purmw_report.set_dataversion(updated_data_version);
+            purmw_report.set_purmw_result(purmw_stat);
+            grpc::Status status;
+            status = this->m_coordinator_stub->PURMWReportSuccess(
+                  &context, purmw_report, &result);
+            std::cerr<<"reply from MDS: "<<result.message();
+            if(status.ok())
+              std::cout<<"data proxy PURMW outtime and inform MDS"<<std::endl;
+            else 
+              std::cout<<"data proxy PURMW outtime and MDS return false"<<std::endl;
+            }
+          catch(const std::exception& e)
+          {
+            std::cerr << e.what() << '\n';
+          }
+
+          return ;
+        }
+        
+        auto delta_send_over_time = std::chrono::steady_clock::now();
+
+
+        //for debug
+        std::cout<<"success saved  parity idx";
+        for(auto const &a : *saved_delta_parity_idx_ptr) std::cout<<a<<' ';
+        std::cout<<"\n";
+
+
+
+        //7. newdata send to memcached
+        auto send_to_datanode = [this](std::string shard_id, char *data, int x_shard_size, std::pair<std::string, int> ip_and_port,std::vector<int> v_version,int idx,int k)
+       {
+           std::cout<<"new data send to data node"<<std::endl;
+           //SetToMemcached(shard_id.c_str(), shard_id.size(), data, x_shard_size, ip_and_port.first.c_str(), ip_and_port.second);
+           this->VersionedBlockToNode(shard_id.c_str(),shard_id.size(),data,  x_shard_size, ip_and_port.first.c_str(), ip_and_port.second,v_version,
+                                idx,k, OppoProject::DiskDataSetWithVersion);
+       };
+         
+        std::vector<std::thread> new_data_senders;
+        for(int i=0;i<new_shard_data_map.size();i++)
+        {
+          int idx=all_update_data_idx[i];
+          std::string shard_id = std::to_string(stripeid * 1000 + idx);
+          data_nodes_ip_port[idx];
+          new_data_senders.push_back(std::thread(send_to_datanode,shard_id,new_shard_data_map[idx].data(),length_from_client,data_nodes_ip_port[idx],latest_data_version,idx,k));
+          //new_data_senders.push_back(std::thread(send_to_datanode, idx, k, shard_id, all_update_data_delta_ptrs.data(), coding, length_from_client, data_nodes_ip_port[idx]));
+        }
+        
+        for(int i=0;i<new_data_senders.size();i++) new_data_senders[i].join();
+        std::cout<<"data proxy PURMW send over! clear temp saved"<<std::endl;
+        m_temp_updating_stripeid=-1;
+        m_temp_new_shard_data_map.clear();
+        m_temp_v_version.clear();
+
+        purmw_stat=OppoProject::PURMWSuccess;
+        try
+        {
+          /* code */
+          
+          /*commitSuccess*/
+          coordinator_proto::PURMWCoordinatorReply purmw_report;
+
+          coordinator_proto::ReplyFromCoordinator result;
+          grpc::ClientContext context;
+
+
+          purmw_report.set_stripeid(stripeid);
+          for(auto const &a : *saved_delta_parity_idx_ptr)
+          {
+            purmw_report.add_success_parity_ids(a);
+          }
+          purmw_report.set_dataidx(updated_data_idx);
+          purmw_report.set_dataversion(updated_data_version);
+          purmw_report.set_purmw_result(purmw_stat);
+
+          grpc::Status status;
+          status = this->m_coordinator_stub->PURMWReportSuccess(
+                &context, purmw_report, &result);
+          std::cerr<<"reply from MDS: "<<result.message();
+          if(status.ok())
+            std::cout<<"data proxy PURMW finished and inform MDS successfully"<<std::endl;
+          else 
+            std::cout<<"data proxy PURMW finished but MDS return false"<<std::endl;
+        }
+        catch(const std::exception& e)
+        {
+          std::cerr << e.what() << '\n';
+        }
+        
+        
+        return;
+      }
+      catch(const std::exception& e)
+      {
+        std::cerr << e.what() << '\n';
+      }
+      
+    };
+
+
+
+    try
+    {
+      int version_len=request->latest_data_version_size();
   
+      for(int i=0;i<version_len;i++)
+        latest_version.push_back(request->latest_data_version(i));
+      std::thread mythread(receive_RMW_PU_update, request->data_proxy_plan(),latest_version,min_tolerace,max_wait_time);
+      mythread.detach();
+    }
+    catch(const std::exception& e)
+    {
+      std::cout << e.what() << '\n';
+    }
+
+    return grpc::Status::OK;
+  }
+  grpc::Status  
+  ProxyImpl::PARIXUpdate(
+        grpc::ServerContext* context, 
+        const proxy_proto::DataProxyUpdatePlan* request, 
+        proxy_proto::DataProxyReply* response)
+  {
+    std::cout<<"there is RMW proxy"<<std::endl;
+    auto PARIX_receive_send = [this](proxy_proto::DataProxyUpdatePlan data_proxy_plan)
+    {
+      std::unordered_map<int,OppoProject::ShardidxRange> data_idx_ranges; //idx->(idx,offset,length) 
+      std::unordered_map<int,std::pair<std::string, int>> data_nodes_ip_port;//idx->node ip port
+      
+      int offset_from_client;
+      int length_from_client;
+      int stripeid=data_proxy_plan.stripeid();
+      int k=data_proxy_plan.k();
+      int real_l=data_proxy_plan.real_l();
+      int m=data_proxy_plan.g_m();
+      OppoProject::EncodeType encode_type=(OppoProject::EncodeType) data_proxy_plan.encode_type();
+      //相关
+      std::vector<int> localparity_idxes;
+      std::vector<int> globalparity_idxes;  
+      std::unordered_map<int,std::vector<char> > new_shard_data_map;//idx->data
+      std::unordered_map<int,std::vector<char> > old_shard_data_map;
+      std::unordered_map<int,std::vector<char> > cur_az_data_delta_map;//包括从proxy 接收以及本AZ计算得到的
+      ClientUpdateInfoConvert(data_proxy_plan.client_info(),data_idx_ranges,localparity_idxes,globalparity_idxes,data_nodes_ip_port);
+      try
+      {
+        /* code */
+        auto read_from_datanode=[this](std::string shardid,int offset,int length,char *data,std::string nodeip,int port)
+        {
+          size_t temp_size;//
+          bool reslut=GetFromMemcached(shardid.c_str(),shardid.size(),data,&temp_size,offset,length,nodeip.c_str(),port);
+          if(!reslut){
+            std::cout<<"getting from data node fails"<<std::endl;
+            return;
+          } 
+        };
+
+        //1. 从client接收
+        if(data_proxy_plan.client_info().receive_client_shard_idx_size()>0)
+        {
+          std::cout<<"waiting for client's connet"<<std::endl;
+          asio::ip::tcp::socket socket_data_dataproxy(io_context);
+          asio::error_code error;
+          acceptor.accept(socket_data_dataproxy,error);
+          if(error)
+          {
+            std::cout<<"client's connet wrong"<<std::endl;
+            std::cout<<error.message()<<std::endl;
+          }
+          OppoProject::Role role=(OppoProject::Role)OppoProject::receive_int(socket_data_dataproxy,error);
+          if(role!=OppoProject::RoleClient) std::cerr<<"wrong connection"<<std::endl;
+          ReceiveDataFromClient(socket_data_dataproxy,new_shard_data_map,offset_from_client,length_from_client,stripeid,error);
+          socket_data_dataproxy.shutdown(asio::ip::tcp::socket::shutdown_both, error);
+          socket_data_dataproxy.close(error);
+        }
+        //2. 给old data 分配空间
+         std::cout<<"2. 给old data 以及delta分配空间"<<std::endl;;
+        for(auto const & ttt:data_idx_ranges)
+        {
+          int idx=ttt.first;
+          int len=data_idx_ranges[idx].range_length;
+          std::vector<char> old_data(len);
+          std::vector<char> data_delta(len);
+          old_shard_data_map[idx]=old_data;//need to assignment
+          std::cout<<"old and cur delta size:"<<old_shard_data_map[idx].size()<<" :"<<cur_az_data_delta_map[idx].size()<<std::endl;
+        }
+        //3. read old
+        for(auto const & ttt : data_idx_ranges)
+        {
+          int idx=ttt.first;
+          int offset=ttt.second.offset_in_shard;
+          int len=ttt.second.range_length;
+
+          std::cout<<"len receive from coordinator"<<std::endl;
+
+          std::string shardid=std::to_string(stripeid*1000+idx);
+          read_from_datanode(shardid,offset,len,old_shard_data_map[idx].data(),data_nodes_ip_port[idx].first,data_nodes_ip_port[idx].second);
+          std::cout<<"read shard:"<<shardid<<std::endl;
+        }
+        //4. send old and new to parity node
+        //已经有的send是用的coding[j]去做的，实际上只需将old new data发给每个节点即可
+        int delta_send_num=0;
+        if(encode_type==RS) delta_send_num=m;
+        else if(encode_type==OppoProject::OPPO_LRC) delta_send_num=m+real_l;
+        else if(encode_type==OppoProject::Azure_LRC_1) delta_send_num=m+real_l+1;
+
+        //5. finish
+
+      }
+      catch(const std::exception& e)
+      {
+        std::cerr << e.what() << '\n';
+      }
+      
+    };
+  }
+  grpc::Status  
+  ProxyImpl::TimeoutRCW(
+        grpc::ServerContext* context, 
+        const proxy_proto::ReconstructWriteNotice* request, proxy_proto::DataProxyReply* response)
+  {
+
+    int stripeid=    request->stripeid();
+    int k =          request->k();
+    int m =          request->m() ;
+    int real_l =     request->real_l();
+    int shard_size=  request->shard_size();
+    OppoProject::EncodeType encode_type =(OppoProject::EncodeType) request->encode_type();
+    std::vector<std::pair<std::string, int>> nodes_ip_and_port;
+    for(int i=0;i<request->nodeip_size();i++)
+    {
+      nodes_ip_and_port.push_back(std::make_pair(request->nodeip(i),request->nodeport(i)));
+    }
+    
+    std::vector<char *> v_data(k);
+    std::vector<char *> v_coding(m + real_l + 1);
+    char **data = (char **)v_data.data();
+    char **coding = (char **)v_coding.data();
+
+    std::vector<std::vector<char>> v_coding_area(m + real_l + 1, std::vector<char>(shard_size));
+    std::vector<std::vector<char>> v_data_area(k,std::vector<char>(shard_size));
+
+    for (int j = 0; j < k; j++)
+    {
+      data[j] = v_data_area[j].data();
+    }
+
+    for (int j = 0; j < m + real_l + 1; j++)
+    {
+      coding[j] = v_coding_area[j].data();
+    }
+
+    /* read old*/
+    std::vector<std::thread> readers;
+
+    auto get_from_node=[this](std::string shard_id,int offset,int length,char* value,std::string ip, int port)
+    {
+      size_t temp_size;
+      bool ret=GetFromMemcached(shard_id.c_str(),shard_id.size(),value,&temp_size,offset,length,ip.c_str(),port);
+      if (!ret)
+      {
+        std::cout << "reconstruct write getFromNode !ret" << std::endl;
+        return;
+      }
+    };
+    if(m_temp_new_shard_data_map.size()!=1 || m_temp_v_version.size()!=k)
+    {
+      std::cerr<<"timeout rcw wrong m_temp_new_shard_data_map_size() or m_temp_v_version.size() "<<m_temp_new_shard_data_map.size()<<" "<<m_temp_v_version.size()<<"\n";
+    }
+    for(auto const & a: m_temp_v_version) 
+    {
+      std::cerr<<a<<' ';
+    }
+    std::cerr<<"\n";
+
+    int new_data_idx = m_temp_new_shard_data_map.begin()->first;
+    std::cerr<<"reconstruct new_data_idx"<<new_data_idx<<'\n';
+    for(int i=0;i<k;i++)
+    {
+      if(i==new_data_idx) continue;
+      std::string shard_id=std::to_string(stripeid*1000+i);
+      readers.push_back(std::thread(get_from_node,shard_id,0,shard_size,data[i],nodes_ip_and_port[i].first,nodes_ip_and_port[i].second));
+    }
+    for(int i=0;i<readers.size();i++) readers[i].join();
+
+    std::copy(m_temp_new_shard_data_map.begin()->second.begin(),m_temp_new_shard_data_map.begin()->second.end(),v_data_area[new_data_idx].begin());
+    std::cout<<"reconstruct read success\n";
+    int send_num=0;
+    if (encode_type == RS)
+    {
+      encode(k, m, 0, data, coding, shard_size, encode_type);
+      send_num =  m;
+    }
+    else if (encode_type == Azure_LRC_1)
+    {
+      // m = g for lrc
+      encode(k, m, real_l, data, coding, shard_size, encode_type);
+      send_num =  m + real_l + 1;
+    }
+    else if (encode_type == OPPO_LRC)
+    {
+      encode(k, m, real_l, data, coding, shard_size, encode_type);
+      send_num =  m + real_l;
+    }
+
+
+    /* set to node*/
+    auto send_to_datanode = [this](int j, int k, std::string shard_id, char **data, char **coding, int x_shard_size, std::pair<std::string, int> ip_and_port,std::vector<int> v_version)
+    {
+      if (j < k)
+      {
+        //SetToMemcached(shard_id.c_str(), shard_id.size(), data[j], x_shard_size, ip_and_port.first.c_str(), ip_and_port.second);
+        this->VersionedBlockToNode(shard_id.c_str(),shard_id.size(), data[j],  x_shard_size, ip_and_port.first.c_str(), ip_and_port.second,v_version,
+                                j,k, OppoProject::DiskDataSetWithVersion);
+      }
+      else
+      {
+
+        //SetToMemcached(shard_id.c_str(), shard_id.size(), coding[j - k], x_shard_size, ip_and_port.first.c_str(), ip_and_port.second);
+        this->VersionedBlockToNode(shard_id.c_str(),shard_id.size(), coding[j - k],  x_shard_size, ip_and_port.first.c_str(), ip_and_port.second,v_version,
+                                j,k, OppoProject::DisKRCWParitySet);
+      }
+    };
+    /*send parity*/
+    std::vector<std::thread> dp_senders;
+    for (int j = 0; j < send_num; j++)
+    {
+      int idx=j+k;
+      std::string shard_id = std::to_string(stripeid * 1000 + idx);
+      std::pair<std::string, int> &ip_and_port = nodes_ip_and_port[idx];
+      dp_senders.push_back(std::thread(send_to_datanode, idx, k, shard_id, data, coding, shard_size, ip_and_port,m_temp_v_version));
+    }
+    /*send new data*/
+    {
+      int idx=new_data_idx;
+      std::string shard_id = std::to_string(stripeid * 1000 + idx);
+      std::pair<std::string, int> &ip_and_port = nodes_ip_and_port[idx];
+      dp_senders.push_back(std::thread(send_to_datanode, idx, k, shard_id, data, coding, shard_size, ip_and_port,m_temp_v_version));
+    }
+    
+    for (int j = 0; j < int(dp_senders.size()); j++)
+    {
+      dp_senders[j].join();
+    }
+    m_temp_new_shard_data_map.clear();
+    m_temp_v_version.clear();
+    return grpc::Status::OK;
+  }
+
+
+
+  grpc::Status ProxyImpl::VersionedRCW(
+        grpc::ServerContext* context, 
+        const proxy_proto::VersionRCWNotice* request,
+        proxy_proto::DataProxyReply* response)
+  {
+    auto receive_rcw=[this](proxy_proto::VersionRCWNotice versioned_notice)
+    {
+      /*1. info transfer*/
+      auto  rcw_notice =versioned_notice.base_rcw_info();
+      int stripeid=    rcw_notice.stripeid();
+      int k =          rcw_notice.k();
+      int m =          rcw_notice.m() ;
+      int real_l =     rcw_notice.real_l();
+      int shard_size=  rcw_notice.shard_size();
+      std::vector<int> v_verison;
+      for(int i=0;i<versioned_notice.v_version_size();i++)
+      {
+        v_verison.push_back(versioned_notice.v_version(i));
+      }
+      /*for debug*/
+      std::cerr<<"Versioned RCW v_version: ";
+      for(int i=0;i<v_verison.size();i++) std::cerr<<v_verison[i]<<' ';
+      std::cerr<<std::endl;
+
+      int offset_from_client=0;
+      int length_from_client=0;
+      OppoProject::EncodeType encode_type =(OppoProject::EncodeType) rcw_notice.encode_type();
+    
+      std::vector<std::pair<std::string, int>> nodes_ip_and_port;
+  
+      for(int i=0;i<rcw_notice.nodeip_size();i++)
+      {
+        nodes_ip_and_port.push_back(std::make_pair(rcw_notice.nodeip(i),rcw_notice.nodeport(i)));
+      }
+
+      /*2. receive */
+      std::unordered_map<int,std::vector<char> > new_shard_data_map;//idx->data
+      try
+      {
+        std::cout<<"waiting for client's connet"<<std::endl;
+        asio::ip::tcp::socket socket_data_dataproxy(io_context);
+        asio::error_code error;
+        acceptor.accept(socket_data_dataproxy,error);
+        if(error)
+        {
+          std::cout<<"client's connet wrong"<<std::endl;
+          std::cout<<error.message()<<std::endl;
+        }
+        OppoProject::Role role=(OppoProject::Role)OppoProject::receive_int(socket_data_dataproxy,error);
+        if(role!=OppoProject::RoleClient) std::cerr<<"wrong connection"<<std::endl;
+        ReceiveDataFromClient(socket_data_dataproxy,new_shard_data_map,offset_from_client,length_from_client,stripeid,error);
+        socket_data_dataproxy.shutdown(asio::ip::tcp::socket::shutdown_both, error);
+        socket_data_dataproxy.close(error);
+      }
+      catch(const std::exception& e)
+      {
+        std::cerr << e.what() << '\n';
+      }
+      if(length_from_client!=shard_size || offset_from_client!=0) std::cerr<<"wrong len offset"<<length_from_client<<' '<<shard_size<<' '<<offset_from_client<<'\n';
+
+      /*3. read old*/
+      std::vector<char *> v_data(k);
+      std::vector<char *> v_coding(m + real_l + 1);
+      char **data = (char **)v_data.data();
+      char **coding = (char **)v_coding.data();
+      std::vector<std::vector<char>> v_coding_area(m + real_l + 1, std::vector<char>(shard_size));
+      std::vector<std::vector<char>> v_data_area(k,std::vector<char>(shard_size));
+      for (int j = 0; j < k; j++)
+      {
+        data[j] = v_data_area[j].data();
+      }
+  
+      for (int j = 0; j < m + real_l + 1; j++)
+      {
+        coding[j] = v_coding_area[j].data();
+      }
+      std::vector<std::thread> readers;
+
+
+      auto get_from_node=[this](std::string shard_id,int offset,int length,char* value,std::string ip, int port)
+      {
+        size_t temp_size;
+        bool ret=GetFromMemcached(shard_id.c_str(),shard_id.size(),value,&temp_size,offset,length,ip.c_str(),port);
+        if (!ret)
+        {
+          std::cout << "reconstruct write getFromNode !ret" << std::endl;
+          return;
+        }
+      };
+
+      for(int i=0;i<k;i++)
+      {
+        if(new_shard_data_map.find(i) != new_shard_data_map.end())  continue;
+        std::string shard_id=std::to_string(stripeid*1000+i);
+        readers.push_back(std::thread(get_from_node,shard_id,0,shard_size,data[i],nodes_ip_and_port[i].first,nodes_ip_and_port[i].second));
+      }
+      for(int i=0;i<readers.size();i++) readers[i].join();
+      /*3.2 copy new to area*/
+
+      for(auto const & ttt : new_shard_data_map)
+      {
+        int idx=ttt.first;
+        std::copy(ttt.second.begin(),ttt.second.end(),data[idx]);
+      }
+      std::cout<<"reconstruct read success\n";
+      /*4. encode*/
+      int all_parity_num=0;
+      if (encode_type == RS)
+      {
+        encode(k, m, 0, data, coding, shard_size, encode_type);
+        all_parity_num =  m;
+      }
+      else if (encode_type == Azure_LRC_1)
+      {
+        // m = g for lrc
+        encode(k, m, real_l, data, coding, shard_size, encode_type);
+        all_parity_num =  m + real_l + 1;
+      }
+      else if (encode_type == OPPO_LRC)
+      {
+        encode(k, m, real_l, data, coding, shard_size, encode_type);
+        all_parity_num =  m + real_l;
+      }
+
+      /*5. send new data and parity with version*/
+      auto send_to_node_with_version = [this](const char *key, size_t key_length, const char *value, size_t value_length, const char *ip, int port,std::vector<int> v_version,
+                             int idx,int k,OppoProject::DataNodeOp datanode_op)
+        {
+          bool ret =this->VersionedBlockToNode(key,  key_length, value,  value_length, ip,  port,v_version,
+                                idx,k, datanode_op);
+        };
+      std::vector<std::thread> senders;
+      for(auto const ttt:new_shard_data_map)
+      {
+        
+        int idx=ttt.first;
+        std::string shard_id = std::to_string(stripeid * 1000 + idx);
+        auto aa=OppoProject::DiskDataSetWithVersion;
+        senders.push_back(std::thread(send_to_node_with_version,shard_id.c_str(),shard_id.size(),ttt.second.data(),ttt.second.size(),
+                                      nodes_ip_and_port[idx].first.c_str(),nodes_ip_and_port[idx].second,v_verison,idx,k,aa));
+      }
+      for(int j=0;j<all_parity_num;j++)
+      {
+        int idx=k+j;
+        std::string shard_id = std::to_string(stripeid * 1000 + idx);
+        auto aa=OppoProject::DisKRCWParitySet;
+        senders.push_back(std::thread(send_to_node_with_version,shard_id.c_str(),shard_id.size(),coding[j],shard_size,
+                                      nodes_ip_and_port[idx].first.c_str(),nodes_ip_and_port[idx].second,v_verison,idx,k,aa));
+      }
+      for(int i=0;i<senders.size();i++) senders[i].join();
+      /*6. inform coordinator*/
+      /*继续用这个updateReportSuccess*/
+      coordinator_proto::CommitAbortKey commit_abort_key;
+      coordinator_proto::ReplyFromCoordinator result;
+      grpc::ClientContext context;
+      commit_abort_key.set_key(std::to_string(stripeid));
+      commit_abort_key.set_ifcommitmetadata(true);
+      grpc::Status status;
+      status = this->m_coordinator_stub->updateReportSuccess(
+            &context, commit_abort_key, &result);
+      if(status.ok())
+        std::cout<<"Versioned RCW finished!"<<std::endl;
+      else 
+        std::cout<<"Versioned RCW finished!"<<std::endl;
+      return;
+    };
+    /*thread detach*/
+    try
+    {
+      /* code */
+      std::thread mythread(receive_rcw,*request);
+      mythread.detach();
+    }
+    catch(const std::exception& e)
+    {
+      std::cerr << e.what() << '\n';
+    }
+    
+    
+    return grpc::Status::OK;
+  }
+
+
+
+  bool ProxyImpl::RMW_receive_calculate(proxy_proto::DataProxyUpdatePlan data_proxy_plan,std::unordered_map<int,std::vector<char> > &new_shard_data_map,
+                              std::unordered_map<int,std::vector<char> > &cur_az_data_delta_map,std::vector<std::vector<char>> &v_coding_area)
+  {
+    //从client收数据需要的结构：
+      std::unordered_map<int,OppoProject::ShardidxRange> data_idx_ranges; //idx->(idx,offset,length) 
+      std::unordered_map<int,std::pair<std::string, int>> data_nodes_ip_port;//idx->node ip port
+      
+      int offset_from_client;
+      int length_from_client;
+      int stripeid=data_proxy_plan.stripeid();
+
+      //相关
+      std::vector<int> localparity_idxes;
+      std::vector<int> globalparity_idxes;  
+      //std::unordered_map<int,std::vector<char> > new_shard_data_map;//idx->data
+      std::unordered_map<int,std::vector<char> > old_shard_data_map;
+      //std::unordered_map<int,std::vector<char> > cur_az_data_delta_map;//包括从proxy 接收以及本AZ计算得到的
+
+      ClientUpdateInfoConvert(data_proxy_plan.client_info(),data_idx_ranges,localparity_idxes,globalparity_idxes,data_nodes_ip_port);
+      try
+      {
+        
+        
+        auto read_from_datanode=[this](std::string shardid,int offset,int length,char *data,std::string nodeip,int port)
+        {
+          size_t temp_size;//
+          bool reslut=GetFromMemcached(shardid.c_str(),shardid.size(),data,&temp_size,offset,length,nodeip.c_str(),port);
+          if(!reslut){
+            std::cout<<"getting from data node fails"<<std::endl;
+            return;
+          } 
+        };
+        
+        //1. 从client接收
+        if(data_proxy_plan.client_info().receive_client_shard_idx_size()>0)
+        {
+          std::cout<<"waiting for client's connet"<<std::endl;
+          asio::ip::tcp::socket socket_data_dataproxy(io_context);
+          asio::error_code error;
+          acceptor.accept(socket_data_dataproxy,error);
+          if(error)
+          {
+            std::cout<<"client's connet wrong"<<std::endl;
+            std::cout<<error.message()<<std::endl;
+          }
+          OppoProject::Role role=(OppoProject::Role)OppoProject::receive_int(socket_data_dataproxy,error);
+          if(role!=OppoProject::RoleClient) std::cerr<<"wrong connection"<<std::endl;
+          ReceiveDataFromClient(socket_data_dataproxy,new_shard_data_map,offset_from_client,length_from_client,stripeid,error);
+          socket_data_dataproxy.shutdown(asio::ip::tcp::socket::shutdown_both, error);
+          socket_data_dataproxy.close(error);
+        }
+
+        //2. 给old data 以及delta分配空间
+        
+        std::cout<<"2. 给old data 以及delta分配空间"<<std::endl;;
+        for(auto const & ttt:data_idx_ranges)
+        {
+          int idx=ttt.first;
+          int len=data_idx_ranges[idx].range_length;
+          std::vector<char> old_data(len);
+          std::vector<char> data_delta(len);
+          old_shard_data_map[idx]=old_data;//need to assignment
+          cur_az_data_delta_map[idx]=data_delta;
+          std::cout<<"old and cur delta size:"<<old_shard_data_map[idx].size()<<" :"<<cur_az_data_delta_map[idx].size()<<std::endl;
+        }
+
+
+        //3. read old
+        for(auto const & ttt : data_idx_ranges){
+          int idx=ttt.first;
+          int offset=ttt.second.offset_in_shard;
+          int len=ttt.second.range_length;
+
+          std::cout<<"len receive from coordinator"<<std::endl;
+
+          std::string shardid=std::to_string(stripeid*1000+idx);
+          read_from_datanode(shardid,offset,len,old_shard_data_map[idx].data(),data_nodes_ip_port[idx].first,data_nodes_ip_port[idx].second);
+          std::cout<<"read shard:"<<shardid<<std::endl;
+        }
+
+        //4. 计算本AZ内 delta
+        std::vector<std::thread> delta_calculators;
+
+        for(auto const & ttt : data_idx_ranges){//read old
+          int idx=ttt.first;
+          int len=ttt.second.range_length;
+          //calculate_data_delta(new_shard_data_map[idx].data(),old_shard_data_map[idx].data(),cur_az_data_delta_map[idx].data(),len);
+        
+          delta_calculators.push_back(std::thread(calculate_data_delta,new_shard_data_map[idx].data(),old_shard_data_map[idx].data(),cur_az_data_delta_map[idx].data(),len));
+        }
+        
+        for(int i=0;i<delta_calculators.size();i++){
+          delta_calculators[i].join();
+        }
+        
+        //5. calculate parity delta
+
+        int k=data_proxy_plan.k();
+        int real_l=data_proxy_plan.real_l();
+        int m=data_proxy_plan.g_m();
+        OppoProject::EncodeType encode_type=(OppoProject::EncodeType) data_proxy_plan.encode_type();
+
+        std::vector<char*> all_update_data_delta_ptrs;
+        std::vector<int> all_update_data_idx;
+
+        std::vector<char *> v_coding(m + real_l + 1);
+        char **coding = (char **)v_coding.data();
+        
+        //std::vector<std::vector<char>> v_coding_area(m + real_l + 1, std::vector<char>(length_from_client));
+        for(int ttttt=0;ttttt<m + real_l + 1;ttttt++)
+        {
+          v_coding_area.push_back(std::vector<char>(length_from_client));
+        }
+
+
+        for(auto const & iter:cur_az_data_delta_map)
+        {
+          all_update_data_delta_ptrs.push_back(const_cast<char*>(iter.second.data()));
+          all_update_data_idx.push_back(iter.first);
+        }
+
+        for (int j = 0; j < m + real_l + 1; j++)
+        {
+          coding[j] = v_coding_area[j].data();
+          bzero(coding[j],length_from_client);
+        }
+
+        RMW_encode(k,m,real_l,all_update_data_delta_ptrs.data(),coding,length_from_client,encode_type,all_update_data_idx);
+        
+      }
+      catch(const std::exception& e)
+      {
+        std::cerr << e.what() << '\n';
+        return false;
+      }
+      return true;
+  }
+
+
+
+
 
   
 

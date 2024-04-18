@@ -113,4 +113,51 @@ bool OppoProject::send_int(asio::ip::tcp::socket &socket,int data){
   int write_byte_num=asio::write(socket, asio::buffer(int_buf, int_buf.size()),error);
   return true;
 }
+
+bool OppoProject::send_vec_int(asio::ip::tcp::socket &socket,std::vector<int> &vec){
+  int len=vec.size();
+  send_int(socket,len);
+  for(auto const &a:vec) send_int(socket,a);
+  return true;
+}
+bool OppoProject::receive_vec_int(asio::ip::tcp::socket &socket,std::vector<int> &vec,asio::error_code &error){
+  int len=receive_int(socket,error);
+  for(int i=0;i<len;i++) vec.push_back(receive_int(socket,error));
+  return true;
+}
+
+bool OppoProject::write_value_to_file(char * data,long long &retaddr,int length,long long offset_in_file,FILE* file_ptr)//default 0,set ,else update
+{
+  std::cout<<"write value:"<<std::string(data,length);
+  if(file_ptr==nullptr)
+
+
+  
+  {
+    std::cout<<"file not open write failed \n ";
+    return false;
+  } 
+  if(offset_in_file==0)//append
+  {
+      fseek(file_ptr,0,SEEK_END);
+      retaddr=ftell(file_ptr);
+      fwrite(data,length,1,file_ptr);
+      return true;
+  }
+  else//update
+  {
+      fseek(file_ptr,offset_in_file,SEEK_SET);
+      fwrite(data,length,1,file_ptr);
+      return true;
+  }
+    return false;
+}
+bool OppoProject::read_value_from_file(char* data, long long addr,int length,FILE* file_ptr)
+{
+  if(file_ptr==nullptr) return false;
+  fseek(file_ptr,addr,SEEK_SET);
+  fread(data,length,1,file_ptr);
+  return true;
+}
+
 // namespace OppoProject

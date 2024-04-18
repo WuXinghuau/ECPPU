@@ -73,6 +73,23 @@ namespace OppoProject
         grpc::ServerContext* context, 
         const proxy_proto::ReconstructWriteNotice* request, 
         proxy_proto::DataProxyReply* response) override;
+    
+    grpc::Status  dataProxyPURMW(
+        grpc::ServerContext* context, 
+        const proxy_proto::PURMWNotice* request, 
+        proxy_proto::PURMWResponse* response) override;
+    grpc::Status TimeoutRCW(
+        grpc::ServerContext* context, 
+        const proxy_proto::ReconstructWriteNotice* request,
+        proxy_proto::DataProxyReply* response) override ;
+    grpc::Status VersionedRCW(
+        grpc::ServerContext* context, 
+        const proxy_proto::VersionRCWNotice* request,
+        proxy_proto::DataProxyReply* response) override ;
+    grpc::Status  PARIXUpdate(
+        grpc::ServerContext* context, 
+        const proxy_proto::DataProxyUpdatePlan* request, 
+        proxy_proto::DataProxyReply* response) override;
 
   private:
     bool init_coordinator();
@@ -85,12 +102,20 @@ namespace OppoProject
   
     bool DataSetToDisk(const char *key, size_t key_length, const char *value, size_t value_length, const char *ip, int port,int version);
     bool ParitySetToDisk(const char *key, size_t key_length, const char *value, size_t value_length, const char *ip, int port,std::vector<int> v_version);
+    bool VersionedBlockToNode(const char *key, size_t key_length, const char *value, size_t value_length, const char *ip, int port,std::vector<int> v_version,
+                             int idx,int k,OppoProject::DataNodeOp datanode_op);
+    bool PUDeltaSendToNode(const char *key,size_t key_length,int offset_in_shard,const char *update_data,size_t update_data_length,int delta_type,const char* ip,int port,
+                          std::vector<int> &latest_v_version,int data_idx,int data_verion,int stripeid);
 
     bool DeltaSendToMemcached(const char *key,size_t key_length,int offset_in_shard,const char *update_data,size_t update_data_length,int delta_type,const char* ip,int port);
     bool DeltaSendToProxy(OppoProject::Role role,std::vector<int> idxes,std::vector<std::vector<char>> &deltas,int offset_inshard,int length,OppoProject::DeltaType delta_type,const char *ip, int port);
     bool ReceiveDeltaFromeProxy(asio::ip::tcp::socket &socket,std::map<int,std::vector<char>> &idx_delta,int &offset,int &length,OppoProject::DeltaType &delta_type);
     bool ReceiveDataFromClient(asio::ip::tcp::socket &socket_data,std::unordered_map<int,std::vector<char> > &new_shard_data_map,int &offset,int &length,int stripeid,asio::error_code &error);
     bool ClientUpdateInfoConvert(proxy_proto::StripeUpdateInfo client_update_info,std::unordered_map<int,OppoProject::ShardidxRange> &data_idx_ranges,std::vector<int> &local_idxes,std::vector<int> &global_idxes,std::unordered_map<int,std::pair<std::string, int>> &nodes_ip_port);
+
+
+    bool RMW_receive_calculate(proxy_proto::DataProxyUpdatePlan data_proxy_plan,std::unordered_map<int,std::vector<char> > &new_shard_data_map,
+                              std::unordered_map<int,std::vector<char> > &cur_az_data_delta_map,std::vector<std::vector<char>> &v_coding_area);//根据MDS的plan从client接收新数据，并读取旧数据，计算出相应的pairty delta，即没有写的过程
     std::string config_path;
     memcached_st *m_memcached;
     std::string proxy_ip_port;
@@ -104,6 +129,11 @@ namespace OppoProject
     std::unordered_map<std::string,int> m_obj_offset_in_buffer;// for update
     sem_t sem;
     std::string coordinator_ip;
+
+    /*for PURMW*/
+    std::unordered_map<int,std::vector<char> > m_temp_new_shard_data_map;//idx,shard
+    int m_temp_updating_stripeid;//for RMWPU reconstruct
+    std::vector<int> m_temp_v_version;////for RMWPU timeout reconstruct
   };
   class Proxy
   {

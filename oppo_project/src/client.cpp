@@ -367,7 +367,7 @@ namespace OppoProject
           }
           else
           {
-            std::cout << key << " update fail!!!!!";
+            std::cout << key << " update fail!!!!! but return stat is OK";
           }
         }
         else
@@ -384,7 +384,7 @@ namespace OppoProject
     }
   }
 
-  bool Client::update(std::string key, int offset, int length,std::string &new_data,UpdateAlgorithm update_algorithm)
+  bool Client::update(std::string key, int offset, int length,std::string &new_data,UpdateAlgorithm update_algorithm,int min_tolerace,int max_wait_time_ms)
   {
     grpc::ClientContext grpccontext;
     coordinator_proto::UpdatePrepareRequest request;
@@ -393,21 +393,21 @@ namespace OppoProject
     request.set_offset(offset);
     request.set_length(length);
     grpc::Status status;
-    switch (update_algorithm)
+    if(update_algorithm==RCW) status= m_coordinator_ptr->updateRCW(&grpccontext, request, &data_location);
+    else if(update_algorithm==RMW) status= m_coordinator_ptr->updateRMW(&grpccontext, request, &data_location);
+    else if(update_algorithm==AZCoordinated) status= m_coordinator_ptr->updateGetLocation(&grpccontext, request, &data_location);
+    else if(update_algorithm==OppoProject::PURMWRCW)
     {
-    case RCW:
-      status= m_coordinator_ptr->updateRCW(&grpccontext, request, &data_location);
-      break;
-    case RMW:
-      status= m_coordinator_ptr->updateRMW(&grpccontext, request, &data_location);
-      break;
-    case AZCoordinated:
+      coordinator_proto::PURMWPrepareReq purmw_req;
+      auto* update_pre_req = purmw_req.mutable_update_pre_req();
+      *update_pre_req = request;
+      purmw_req.set_minimal_tolerance(min_tolerace);
+      purmw_req.set_max_wait_time_ms(max_wait_time_ms);
+      status= m_coordinator_ptr->ECPUGetLocation(&grpccontext,purmw_req, &data_location);
+    }
+    else
+    {
       status= m_coordinator_ptr->updateGetLocation(&grpccontext, request, &data_location);
-      break;
-    
-    default:
-      status= m_coordinator_ptr->updateGetLocation(&grpccontext, request, &data_location);
-      break;
     }
      
     if (status.ok())
@@ -536,13 +536,23 @@ namespace OppoProject
       std::cout<<"waiting for proxy update success"<<std::endl;
 
       grpc::ClientContext check_commit;
-      coordinator_proto::AskIfSetSucess request;
-      request.set_key(key);
+      grpc::Status status;  
       coordinator_proto::RepIfSetSucess reply;
-      grpc::Status status;
-      status =
-          m_coordinator_ptr->checkUpdateFinished(&check_commit, request, &reply);
-      std::cout<<"m_coordinator_ptr error!!!!!"<<std::endl;
+      if(update_algorithm==OppoProject::PURMWRCW)
+      {
+        coordinator_proto::AskRMWPUSucess request;
+        request.set_key(key);
+        request.set_max_wait_time_ms(10000);
+        m_coordinator_ptr->PURMWCheckFinished(&check_commit, request, &reply);
+      }
+      else
+      {
+        coordinator_proto::AskIfSetSucess request;
+        request.set_key(key);
+      
+        status =
+            m_coordinator_ptr->checkUpdateFinished(&check_commit, request, &reply);
+      }
       if (status.ok())
       {
         if (reply.ifcommit())
@@ -618,5 +628,33 @@ namespace OppoProject
 
     // std::cout << "set " << std::string(key) << " " << std::string(ip) << " " << port << " " << (MEMCACHED_SUCCESS==rc) << " " << value_length << std::endl;
     return true;
+  }
+
+  bool Client::printVersionOnCoordinator(std::string key) const
+  {
+    coordinator_proto::printVersionReq request;
+    if(key.length()==0)
+    {
+      request.set_printallstripes(true);
+    }
+    else
+    {
+      request.set_printallstripes(false);
+      request.set_key(key);
+    }
+    coordinator_proto::printVersionResponse reply;
+    grpc::ClientContext context;
+    grpc::Status status =
+        m_coordinator_ptr->printVersion(&context, request, &reply);
+    if (status.ok())
+    {
+      return true;
+    }
+    else
+    {
+      std::cout << status.error_code() << ": " << status.error_message()
+                << std::endl;
+      return "RPC failed";
+    }
   }
 } // namespace OppoProject

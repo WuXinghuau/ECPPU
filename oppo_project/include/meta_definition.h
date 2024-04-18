@@ -128,7 +128,9 @@ namespace OppoProject
     RCW=0,
     RMW,
     AZCoordinated,
-    MinimalTraffic
+    MinimalTraffic,
+    PURMWRCW,
+    PARIX
   };
 
   enum DataNodeOp
@@ -138,11 +140,32 @@ namespace OppoProject
     MemcParityLogging=2,//log in file
     MemcInplaceUpdate=3,
     DiskDataSetWithVersion=4,
-    DiskParitySetWithVersion=5
+    DiskParitySetWithVersion=5,
+    PUDeltaSetWithVersion=6,
+    DisKRCWParitySet
   };
 
+  enum ECPUMethod
+  {
+    ECPURModifyWrite=0,
+    ECPUReconstrucWrite
+  };
+
+  enum PURMWUpdateStat
+  {
+    PURMWSuccess=0,
+    FailAndReceiveNewData,
+    FailAndNoNewData
+  };
+
+  enum DeltaStat
+  {
+    MarkDelete=0
+  };
+
+
   const int initial_version_num=0;
-  const long long initial_disk_size=1<<32;
+  const unsigned long initial_disk_size=1<<29;
 
 } // namespace OppoProject
 

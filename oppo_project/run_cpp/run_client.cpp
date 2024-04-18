@@ -94,7 +94,7 @@ int main(int argc, char **argv)
   {
     
     
-    for (int i = 0; i < 100; i++)
+    for (int i = 0; i < 1; i++)
 
     {
       std::string key;
@@ -115,7 +115,7 @@ int main(int argc, char **argv)
       if (value == get_value) {
         std::cout << "set kv successfully" << std::endl;
       } else {
-        std::cout << "wrong!" << std::endl;
+        std::cout << "set!= get wrong!" << std::endl;
         break;
       }
     }
